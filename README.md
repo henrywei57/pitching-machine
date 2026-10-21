@@ -69,14 +69,40 @@ python -m pitching_machine.pitch curveball --wheels 2   # the old two-wheel mach
 python -m pitching_machine.pitch --wheels 2 --rpm 3300 1900   # two wheels by hand: top, bottom
 ```
 
-To watch it in MuJoCo's 3D viewer:
+### Watching it in 3D
 
 ```bash
-mjpython -m pitching_machine.view knuckleball   # on a Mac. Use plain python on Windows/Linux
-mjpython -m pitching_machine.view --rpm 3200 2600 2000   # watch your own wheel settings
+mjpython -m pitching_machine.view                         # on a Mac. Use plain python on Windows/Linux
+mjpython -m pitching_machine.view --rpm 3200 2600 2000    # start from your own wheel speeds
+mjpython -m pitching_machine.view curveball --camera catcher
 ```
 
-To run the tests (39 of them, about 30 seconds) and remake every graph and GIF here:
+A window opens and the machine keeps throwing: the launch in slow motion,
+then the flight at half speed with an orange trail behind the ball. The
+numbers in the top-left corner show the wheel speeds, what came out of the
+machine, and where the ball crossed the plate.
+
+**Changing the wheel speeds while it's running:** in the panel on the right,
+open **Control**. There's a slider for each wheel: `top_rpm`, `lower_3B_rpm`
+and `lower_1B_rpm` (0 to 6000 rpm). Drag one and the next pitch uses the new
+speed. The machine re-aims at the middle of the zone first, so the ball still
+comes in for a strike and you can see how the break changes.
+
+**Camera views:** press `[` and `]` to switch between them, or `Esc` for a
+free camera (drag to spin around, right-drag to move, scroll to zoom).
+
+| view | where you're standing |
+|---|---|
+| `watcher` (default) | just behind the machine, watching it throw toward the plate |
+| `catcher` | behind home plate, with the ball coming right at you |
+| `batter` | in the right-handed batter's box |
+| `side` | off to the third-base side, far enough back to see the whole flight |
+| `machine` | close-up of the three wheels grabbing the ball |
+| `follow_ball` | rides along next to the ball all the way to the plate |
+
+### Tests and graphs
+
+To run the tests (44 of them, about 40 seconds) and remake every graph and GIF here:
 
 ```bash
 pytest
@@ -290,10 +316,10 @@ pitching_machine/
   flight.py            flies the ball to the plate, measures break like Statcast does
   imu.py               the fake sensor inside the ball
   pitch.py             presets, aiming, and the command line tool
-  view.py              the 3D viewer
+  view.py              the 3D viewer (camera views, rpm sliders)
   pybullet_machine.py  the same machine in PyBullet
 experiments/           one script for each graph
-tests/                 39 tests (contact springs, symmetry, same-answer-twice, step size, the IMU, ...)
+tests/                 44 tests (contact springs, symmetry, same-answer-twice, step size, the IMU, ...)
 ```
 
 ## What's not realistic (yet)

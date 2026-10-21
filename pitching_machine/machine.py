@@ -40,7 +40,7 @@ from the barrel: 90 is the top, 210 lower on the 3B side, 330 lower on the 1B
 side, 270 the bottom.
 """
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 
 import mujoco
 import numpy as np
@@ -50,6 +50,7 @@ from .seams import seam_points
 
 
 THREE_WHEEL = (90.0, 210.0, 330.0)  # top, lower 3B side, lower 1B side
+MAX_RPM = 6000.0  # motor limit; also the range of the viewer's rpm sliders
 TWO_WHEEL = (90.0, 270.0)  # top and bottom
 
 
@@ -109,6 +110,10 @@ class MachineConfig:
     def __post_init__(self):
         if len(self.wheel_rpm) != len(self.wheel_angles_deg):
             raise ValueError("need one wheel_rpm per wheel angle")
+
+    def check_rpm(self):
+        if min(self.wheel_rpm) < 0 or max(self.wheel_rpm) > MAX_RPM:
+            raise ValueError(f"wheel rpm must be between 0 and {MAX_RPM:.0f}, got {self.wheel_rpm}")
 
     def with_(self, **kw):
         return replace(self, **kw)
@@ -264,6 +269,44 @@ def nip_angle(cfg):
     return np.arccos(wheel_offset(cfg) / (cfg.wheel_radius + BALL_RADIUS))
 
 
+def ball_start(cfg):
+    """Where the ball sits in the chute (world position and orientation quaternion)."""
+    R_head = head_rotation(cfg)
+    pos = np.array([0, 0, cfg.release_height]) + R_head @ np.array([entry_x(cfg) - 0.002, 0, 0])
+    return pos, mat_to_quat(R_head @ quat_to_mat(cfg.ball_quat))
+
+
+def motor_names(cfg):
+    """Actuator names, which the viewer shows next to its rpm sliders."""
+    names = [wheel_label(t).replace(" ", "_") + "_rpm" for t in cfg.wheel_angles_deg]
+    return [n if names.count(n) == 1 else f"{n}{i}" for i, n in enumerate(names)]
+
+
+def _lookat(pos, target):
+    """MJCF xyaxes for a camera at pos looking at target, with world z up."""
+    f = np.asarray(target, float) - np.asarray(pos, float)
+    f /= np.linalg.norm(f)
+    right = np.cross(f, [0.0, 0.0, 1.0])
+    right /= np.linalg.norm(right)
+    return _fmt(np.r_[right, np.cross(right, f)])
+
+
+FOVY = {"watcher": 50, "side": 55}
+
+
+# Named views for the viewer and renderer. "watcher" is someone standing next to
+# the machine, a little behind it, watching it throw.
+def cameras(cfg, plate_distance=PLATE_DISTANCE):
+    h, xp = cfg.release_height, plate_distance
+    return {
+        "watcher": ((-2.6, -0.95, 1.75), (xp * 0.6, 0.15, 1.05)),
+        "catcher": ((xp + 1.2, 0.0, 0.95), (0.0, 0.0, h)),
+        "batter": ((xp + 0.45, -0.75, 1.55), (0.0, 0.0, h)),
+        "side": ((xp * 0.5, -13.0, 1.3), (xp * 0.5, 0.0, 1.0)),
+        "machine": ((-0.9, -0.42, h + 0.17), (0.0, 0.0, h)),
+    }
+
+
 def build_mjcf(cfg, scene=False, plate_distance=PLATE_DISTANCE):
     """MJCF text for the machine and ball.
 
@@ -332,11 +375,14 @@ def build_mjcf(cfg, scene=False, plate_distance=PLATE_DISTANCE):
     <geom name="dirt" type="cylinder" pos="{xp + 0.2} 0 0.001" size="2.0 0.001" rgba="0.62 0.42 0.27 1" {nocollide}/>
     <geom name="plate" type="box" pos="{xp + 8.5 * INCH} 0 0.004" size="{8.5 * INCH} {8.5 * INCH} 0.004" rgba="1 1 1 1" {nocollide}/>
     <geom name="post" type="cylinder" fromto="-0.05 0 0 -0.05 0 {low}" size="0.035" rgba="0.2 0.2 0.22 1" {nocollide}/>
-    {zone}"""
+    {zone}""" + "".join(
+            f'\n    <camera name="{name}" pos="{_fmt(pos)}" xyaxes="{_lookat(pos, target)}" fovy="{FOVY.get(name, 40)}"/>'
+            for name, (pos, target) in cameras(cfg, plate_distance).items())
 
-    x0 = entry_x(cfg) - 0.002
-    ball_pos = np.array([0, 0, cfg.release_height]) + R_head @ np.array([x0, 0, 0])
-    ball_quat = mat_to_quat(R_head @ quat_to_mat(cfg.ball_quat))
+    ball_pos, ball_quat = ball_start(cfg)
+    # Rides along with the ball but doesn't turn with it.
+    follow = (f'\n      <camera name="follow_ball" mode="trackcom" pos="-1.1 -0.75 0.35" '
+              f'xyaxes="{_lookat((-1.1, -0.75, 0.35), (0, 0, 0))}" fovy="45"/>') if scene else ""
 
     def wheel(i, d, a):
         # Wheel body frame: x along the barrel, y along the axle, z toward the wheel.
@@ -351,9 +397,14 @@ def build_mjcf(cfg, scene=False, plate_distance=PLATE_DISTANCE):
       </body>"""
 
     wheels = "".join(wheel(i, d, a) for i, (d, a) in enumerate(zip(dirs, axles)))
+    # Motor commands are in rpm. The gear turns the axle's rad/s (negative drives the
+    # tire toward the plate) into rpm, and kv and the force limit are rescaled so
+    # the torque on the axle is still kv * (target - speed), capped at motor_torque.
+    gear = -1.0 / RPM
     motors = "\n    ".join(
-        f'<velocity name="motor{i}" joint="axle{i}" kv="{cfg.motor_kv}" forcerange="{-cfg.motor_torque} {cfg.motor_torque}"/>'
-        for i in range(n))
+        f'<velocity name="{name}" joint="axle{i}" gear="{gear:.12g}" kv="{cfg.motor_kv / gear**2:.12g}" '
+        f'ctrlrange="0 {MAX_RPM:g}" forcerange="{-cfg.motor_torque * RPM:.12g} {cfg.motor_torque * RPM:.12g}"/>'
+        for i, name in enumerate(motor_names(cfg)))
 
     return f"""
 <mujoco model="{n}_wheel_pitching_machine">
@@ -380,7 +431,7 @@ def build_mjcf(cfg, scene=False, plate_distance=PLATE_DISTANCE):
       <freejoint name="ball"/>
       <inertial pos="0 0 0" mass="{BALL_MASS}" diaginertia="{BALL_INERTIA} {BALL_INERTIA} {BALL_INERTIA}"/>
       <geom name="ball" type="sphere" size="{BALL_RADIUS}" rgba="0.96 0.95 0.9 1" {nocollide}/>
-      <site name="imu" pos="0 0 0" size="0.005"/>
+      <site name="imu" pos="0 0 0" size="0.005"/>{follow}
       {stitches}
     </body>
   </worldbody>{pairs}
@@ -481,6 +532,7 @@ class Machine:
     """The compiled MuJoCo model for one configuration, plus the contact law."""
 
     def __init__(self, cfg: MachineConfig, scene=False):
+        cfg.check_rpm()
         self.cfg = cfg
         self.model = mujoco.MjModel.from_xml_string(build_mjcf(cfg, scene=scene))
         self.data = mujoco.MjData(self.model)
@@ -494,8 +546,28 @@ class Machine:
         self.qadr = [m.jnt_qposadr[m.joint(f"axle{i}").id] for i in self.wheels]
         self.ball_qadr = m.jnt_qposadr[m.joint("ball").id]
         self.ball_dadr = m.jnt_dofadr[m.joint("ball").id]
+        self.head_body = m.body("head").id
         self.R_head = head_rotation(cfg)
         self.contacts = {}
+        self.reset()
+
+    # Things that can change without rebuilding the model.
+    RETARGETABLE = {"wheel_rpm", "elevation_deg", "azimuth_deg", "tilt_deg", "ball_quat"}
+
+    def retarget(self, cfg: MachineConfig):
+        """Switch to new wheel speeds, aim or chute orientation in place, so an open
+        viewer keeps working. Anything else (wheel layout, squeeze, ...) needs a new Machine."""
+        changed = {f.name for f in fields(cfg) if getattr(cfg, f.name) != getattr(self.cfg, f.name)}
+        if changed - self.RETARGETABLE:
+            raise ValueError(f"can't change {sorted(changed - self.RETARGETABLE)} in place; build a new Machine")
+        cfg.check_rpm()
+        self.cfg = cfg
+        self.R_head = head_rotation(cfg)
+        m = self.model
+        m.body_quat[self.head_body] = mat_to_quat(self.R_head)
+        pos, quat = ball_start(cfg)
+        m.qpos0[self.ball_qadr : self.ball_qadr + 3] = pos
+        m.qpos0[self.ball_qadr + 3 : self.ball_qadr + 7] = quat
         self.reset()
 
     @property
@@ -509,7 +581,7 @@ class Machine:
         tgt = self.wheel_targets
         for i in self.wheels:
             d.qvel[self.dadr[i]] = tgt[i]  # wheels already up to speed, as on a real machine
-        d.ctrl[:] = tgt
+        d.ctrl[:] = self.cfg.wheel_rpm  # motor commands are in rpm
         d.qvel[self.ball_dadr : self.ball_dadr + 3] = self.R_head @ np.array([self.cfg.feed_speed, 0, 0])
         mujoco.mj_forward(m, d)
         self.contacts = {}
@@ -556,7 +628,7 @@ class Machine:
             t1 = _cross(axis, n)  # along the direction of travel
             T = np.stack([t1, _cross(n, t1)])  # tangent basis (second row: across the tire)
             # Wheel angular acceleration from everything except friction.
-            tau = min(max(cfg.motor_kv * (d.ctrl[k] - w), -cfg.motor_torque), cfg.motor_torque)
+            tau = min(max(cfg.motor_kv * (-d.ctrl[k] * RPM - w), -cfg.motor_torque), cfg.motor_torque)
             alpha_w = (tau - cfg.bearing_damping * w) / cfg.wheel_inertia
             cons.append((k, n, fn, r_b, r_w, u, slip, T, alpha_w, axis, squash))
         if not cons:
