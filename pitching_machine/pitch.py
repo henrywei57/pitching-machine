@@ -1,7 +1,7 @@
 """Machine + air: throw a pitch from wheel settings and see where it crosses the plate.
 
-    python -m knuckle.pitch curveball
-    python -m knuckle.pitch --speed 85 --spin -2000 --tilt 15 --calibrate --plot pitch.png
+    python -m pitching_machine.pitch curveball
+    python -m pitching_machine.pitch --speed 85 --spin -2000 --tilt 15 --calibrate --plot pitch.png
 """
 
 import argparse

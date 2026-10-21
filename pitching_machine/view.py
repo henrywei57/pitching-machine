@@ -1,8 +1,8 @@
 """Watch a pitch in MuJoCo's interactive viewer: the launch in slow motion,
 then the flight to the plate, on a loop.
 
-    mjpython -m knuckle.view curveball      # macOS (mjpython ships with mujoco)
-    python -m knuckle.view knuckleball      # Linux / Windows
+    mjpython -m pitching_machine.view curveball      # macOS (mjpython ships with mujoco)
+    python -m pitching_machine.view knuckleball      # Linux / Windows
 
 Drag to orbit, right-drag to pan, scroll to zoom. Close the window to quit.
 """

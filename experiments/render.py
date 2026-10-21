@@ -13,11 +13,11 @@ import numpy as np
 from _style import MEDIA, ROOT
 from PIL import Image, ImageDraw, ImageFont
 
-from knuckle.aero import Aero, random_rotations
-from knuckle.constants import MPH, PLATE_DISTANCE, RPM
-from knuckle.flight import fly
-from knuckle.machine import WHEELS, Machine
-from knuckle.pitch import preset_config, throw
+from pitching_machine.aero import Aero, random_rotations
+from pitching_machine.constants import MPH, PLATE_DISTANCE, RPM
+from pitching_machine.flight import fly
+from pitching_machine.machine import WHEELS, Machine
+from pitching_machine.pitch import preset_config, throw
 from plate_scatter import chute_composer
 
 W, H = 640, 360

@@ -3,7 +3,7 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "knuckle"
+name = "pitching-machine"
 version = "0.1.0"
 description = "A two-wheel pitching machine in MuJoCo, with seam-dependent knuckleball aerodynamics and a virtual instrumented baseball."
 readme = "README.md"
@@ -18,7 +18,7 @@ bullet = ["pybullet>=3.2"]
 dev = ["pytest>=7", "imageio>=2.30", "pillow>=10"]
 
 [tool.setuptools]
-packages = ["knuckle"]
+packages = ["pitching_machine"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

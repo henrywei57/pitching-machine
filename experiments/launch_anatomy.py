@@ -8,9 +8,9 @@ from _style import INK, INK_2, MUTED, SERIES, label_end, save, setup
 
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from knuckle.constants import G, MPH, RPM
-from knuckle.pitch import preset_config
-from knuckle.machine import Machine
+from pitching_machine.constants import G, MPH, RPM
+from pitching_machine.pitch import preset_config
+from pitching_machine.machine import Machine
 
 
 def main():

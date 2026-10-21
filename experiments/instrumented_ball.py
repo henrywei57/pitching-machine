@@ -1,7 +1,7 @@
 """What if the ball itself is the instrument?
 
 Throw a knuckleball with the full model standing in for reality. Put a
-virtual IMU in it (knuckle/imu.py), with noise and bias. From nothing but the
+virtual IMU in it (pitching_machine/imu.py), with noise and bias. From nothing but the
 IMU's samples, the starting orientation and the radar speed, recover the
 aerodynamic force on the ball at every instant. Then compare that to what a
 simple model (constant drag, no seams) predicts. The simulation predicts, the
@@ -14,12 +14,12 @@ import numpy as np
 from _style import INK, INK_2, MUTED, PITCH_COLOR, SERIES, label_end, save, setup
 
 import matplotlib.pyplot as plt
-from knuckle.aero import Aero, acceleration
-from knuckle.constants import FOOT, INCH
-from knuckle.flight import fly
-from knuckle.imu import IMUSpec, model_residual, reconstruct, record
-from knuckle.machine import quat_to_mat
-from knuckle.pitch import preset_config, throw
+from pitching_machine.aero import Aero, acceleration
+from pitching_machine.constants import FOOT, INCH
+from pitching_machine.flight import fly
+from pitching_machine.imu import IMUSpec, model_residual, reconstruct, record
+from pitching_machine.machine import quat_to_mat
+from pitching_machine.pitch import preset_config, throw
 
 NAIVE = Aero(drag="constant", cd_constant=0.35, seam=False)
 

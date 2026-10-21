@@ -1,6 +1,6 @@
 """The same two-wheel machine in PyBullet, where this project started.
 
-Same wheels, ball, squeeze, friction and contact spring as knuckle.machine,
+Same wheels, ball, squeeze, friction and contact spring as pitching_machine.machine,
 built from PyBullet primitives with compliant contact (contactStiffness /
 contactDamping). Used by experiments/compare_engines.py to see how much the
 answer depends on the engine.
@@ -64,7 +64,7 @@ def launch(cfg: MachineConfig, timestep=None, solver_iterations=100) -> BulletLa
                 linkParentIndices=[0], linkJointTypes=[p.JOINT_REVOLUTE], linkJointAxis=[[0, 0, 1]],
                 physicsClientId=cid,
             )
-            # Joint axis is link z = world y, so the signs match knuckle.machine.
+            # Joint axis is link z = world y, so the signs match pitching_machine.machine.
             omega = w * 2 * np.pi / 60
             p.changeDynamics(body, 0, lateralFriction=mu_each, rollingFriction=0, spinningFriction=0, restitution=0,
                              contactStiffness=k_each, contactDamping=d_each, linearDamping=0, angularDamping=0,

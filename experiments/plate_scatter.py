@@ -15,11 +15,11 @@ from _style import INK_2, MUTED, PITCH_COLOR, SURFACE, label_end, save, setup
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
-from knuckle.aero import random_rotations
-from knuckle.constants import FOOT, INCH
-from knuckle.flight import fly
-from knuckle.machine import _rx, head_rotation, launch, quat_to_mat
-from knuckle.pitch import PRESETS, preset_config, throw
+from pitching_machine.aero import random_rotations
+from pitching_machine.constants import FOOT, INCH
+from pitching_machine.flight import fly
+from pitching_machine.machine import _rx, head_rotation, launch, quat_to_mat
+from pitching_machine.pitch import PRESETS, preset_config, throw
 
 N = 300
 

@@ -12,9 +12,9 @@ import numpy as np
 from _style import INK, INK_2, MUTED, PITCH_COLOR, label_end, save, setup
 
 import matplotlib.pyplot as plt
-from knuckle.constants import RPM
-from knuckle.machine import launch, nip_angle, settings_for
-from knuckle.pitch import PRESETS, preset_config
+from pitching_machine.constants import RPM
+from pitching_machine.machine import launch, nip_angle, settings_for
+from pitching_machine.pitch import PRESETS, preset_config
 
 
 # Ordinal ramps: friction on the blue ramp (light = slick), squeeze on a neutral one.

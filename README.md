@@ -1,4 +1,4 @@
-# knuckle-curve
+# pitching-machine
 
 A two-wheel pitching machine simulated from the contact patch up, in MuJoCo.
 
@@ -19,19 +19,19 @@ The project is three problems stacked on each other:
 
 | | problem | where |
 |---|---|---|
-| the machine | spin comes from the difference in wheel surface speeds, and the ball leaves slower than the rims because it squashes and slips | [`knuckle/machine.py`](knuckle/machine.py) |
-| the air | drag, Magnus lift, and a seam force fit to wind-tunnel knuckleball data; a non-spinning ball has no single drag coefficient | [`knuckle/aero.py`](knuckle/aero.py), [`knuckle/seams.py`](knuckle/seams.py) |
+| the machine | spin comes from the difference in wheel surface speeds, and the ball leaves slower than the rims because it squashes and slips | [`pitching_machine/machine.py`](pitching_machine/machine.py) |
+| the air | drag, Magnus lift, and a seam force fit to wind-tunnel knuckleball data; a non-spinning ball has no single drag coefficient | [`pitching_machine/aero.py`](pitching_machine/aero.py), [`pitching_machine/seams.py`](pitching_machine/seams.py) |
 | the physics under both | solver choice, contact models, timestep convergence, determinism | [`experiments/compare_engines.py`](experiments/compare_engines.py), [`tests/`](tests) |
 
 And one idea that ties them together: put a virtual IMU inside the ball
-([`knuckle/imu.py`](knuckle/imu.py)) and let the ball measure the forces the
+([`pitching_machine/imu.py`](pitching_machine/imu.py)) and let the ball measure the forces the
 model gets wrong.
 
 ## Quick start
 
 ```bash
-git clone https://github.com/henrywei57/knuckle-curve.git
-cd knuckle-curve
+git clone https://github.com/henrywei57/pitching-machine.git
+cd pitching-machine
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,render]"
 ```
@@ -39,7 +39,7 @@ pip install -e ".[dev,render]"
 Throw a pitch:
 
 ```bash
-python -m knuckle.pitch curveball
+python -m pitching_machine.pitch curveball
 ```
 
 ```
@@ -56,15 +56,15 @@ Presets are `fastball`, `curveball`, `knuckle-curve` and `knuckleball`, or dial
 your own:
 
 ```bash
-python -m knuckle.pitch --speed 85 --spin -2000 --tilt 15 --plot pitch.png
-python -m knuckle.pitch fastball --calibrate      # adjust the wheels until the "radar gun" agrees
-python -m knuckle.pitch knuckleball --seed 3      # drop the ball into the chute a different way
+python -m pitching_machine.pitch --speed 85 --spin -2000 --tilt 15 --plot pitch.png
+python -m pitching_machine.pitch fastball --calibrate      # adjust the wheels until the "radar gun" agrees
+python -m pitching_machine.pitch knuckleball --seed 3      # drop the ball into the chute a different way
 ```
 
 Watch it in MuJoCo's viewer (slow-motion launch, then the flight, on a loop):
 
 ```bash
-mjpython -m knuckle.view knuckleball     # macOS; use plain python on Linux/Windows
+mjpython -m pitching_machine.view knuckleball     # macOS; use plain python on Linux/Windows
 ```
 
 Run the tests (31, about 20 s) and rebuild every figure in this README:
@@ -141,14 +141,14 @@ What the launch shows:
 
 ## 2. The air
 
-[`knuckle/aero.py`](knuckle/aero.py) has three quasi-steady forces:
+[`pitching_machine/aero.py`](pitching_machine/aero.py) has three quasi-steady forces:
 
 - **Drag** with a drag crisis: the fit to Adair's baseball data from Giordano
   & Nakanishi, C_D falling from about 0.55 to 0.22 around 35 m/s (78 mph).
 - **Magnus lift,** C_L = 1/(2.32 + 0.4/S) with S = rω/v, the fit used in Alan
   Nathan's trajectory calculator.
 - **A seam force.** Every bit of seam (the curve in
-  [`knuckle/seams.py`](knuckle/seams.py)) gets a kernel K(α) depending on its
+  [`pitching_machine/seams.py`](pitching_machine/seams.py)) gets a kernel K(α) depending on its
   angle from the front of the ball, and pushes the ball sideways toward or
   away from itself. K was fit so that a non-spinning ball turned about a
   vertical axis reproduces Watts & Sawyer's wind-tunnel knuckleball
@@ -250,7 +250,7 @@ with a simple model (constant C_D = 0.35, no seams):
 ## Layout
 
 ```
-knuckle/
+pitching_machine/
   machine.py           MuJoCo machine: MJCF builder, explicit Coulomb contact, launch, calibrate
   aero.py              drag crisis, Magnus lift, seam force (vectorized over many balls)
   seams.py             seam curve on the sphere

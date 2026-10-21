@@ -10,8 +10,8 @@ is also run twice to check it gives bit-identical answers.
 import numpy as np
 from _style import FIGURES, ROOT
 
-from knuckle.constants import MPH, RPM
-from knuckle.machine import launch, settings_for
+from pitching_machine.constants import MPH, RPM
+from pitching_machine.machine import launch, settings_for
 
 PITCHES = {"fastball": (90, -2200), "curveball": (78, 2500), "knuckleball": (67, 0)}
 
@@ -24,7 +24,7 @@ def mujoco(contact_model, dt):
 
 
 def bullet(dt):
-    from knuckle.pybullet_machine import launch as bl
+    from pitching_machine.pybullet_machine import launch as bl
 
     def run(cfg):
         r = bl(cfg, timestep=dt)

@@ -1,9 +1,9 @@
 import numpy as np
 import pytest
 
-from knuckle.aero import Aero, random_rotations
-from knuckle.constants import G, INCH
-from knuckle.flight import fly, rotations
+from pitching_machine.aero import Aero, random_rotations
+from pitching_machine.constants import G, INCH
+from pitching_machine.flight import fly, rotations
 
 
 def test_rotation_vectors():

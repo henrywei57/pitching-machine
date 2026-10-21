@@ -7,8 +7,8 @@ Nakanishi fit their data with
 
     F_lat / mg = 0.5 [sin 4t - 0.25 sin 8t + 0.08 sin 12t - 0.025 sin 16t]
 
-The model in knuckle/aero.py instead puts a kernel on every bit of seam
-(knuckle/seams.py) depending on how far it sits from the front of the ball.
+The model in pitching_machine/aero.py instead puts a kernel on every bit of seam
+(pitching_machine/seams.py) depending on how far it sits from the front of the ball.
 This script finds the smallest kernel that makes the 3-D model reproduce
 that curve when the ball is turned the same way, then prints it for
 SEAM_KERNEL.
@@ -21,11 +21,11 @@ from _style import INK, INK_2, MUTED, SERIES, save, setup
 
 import matplotlib.pyplot as plt
 from scipy.optimize import least_squares
-from knuckle import aero
-from knuckle.aero import Aero, drag_coefficient, kernel, random_rotations, seam_terms
-from knuckle.constants import BALL_AREA, BALL_MASS, G, MPH, RHO_AIR
-from knuckle.machine import _rz
-from knuckle.seams import seam_points
+from pitching_machine import aero
+from pitching_machine.aero import Aero, drag_coefficient, kernel, random_rotations, seam_terms
+from pitching_machine.constants import BALL_AREA, BALL_MASS, G, MPH, RHO_AIR
+from pitching_machine.machine import _rz
+from pitching_machine.seams import seam_points
 
 
 def giordano(theta):
@@ -74,7 +74,7 @@ def main():
     print(f"rms misfit: {100 * rms:.2f}% of the measured curve")
     in_package = np.array(aero.SEAM_KERNEL).ravel()
     if np.abs(in_package - p).max() > 0.01:
-        print(f"note: knuckle/aero.py has {tuple(map(tuple, aero.SEAM_KERNEL))}")
+        print(f"note: pitching_machine/aero.py has {tuple(map(tuple, aero.SEAM_KERNEL))}")
 
     fig, axs = plt.subplots(1, 3, figsize=(13, 4.0))
 

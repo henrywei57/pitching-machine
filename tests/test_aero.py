@@ -1,11 +1,11 @@
 import numpy as np
 import pytest
 
-from knuckle import aero
-from knuckle.aero import Aero, acceleration, drag_coefficient, kernel, random_rotations, seam_terms
-from knuckle.constants import BALL_AREA, BALL_MASS, G, RHO_AIR
-from knuckle.machine import _rz
-from knuckle.seams import seam_points
+from pitching_machine import aero
+from pitching_machine.aero import Aero, acceleration, drag_coefficient, kernel, random_rotations, seam_terms
+from pitching_machine.constants import BALL_AREA, BALL_MASS, G, RHO_AIR
+from pitching_machine.machine import _rz
+from pitching_machine.seams import seam_points
 
 
 def test_seam_lies_on_the_sphere():

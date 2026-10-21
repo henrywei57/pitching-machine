@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from knuckle.constants import MPH, RPM
-from knuckle.machine import Machine, MachineConfig, calibrate, launch, nip_angle, quat_to_mat, settings_for
+from pitching_machine.constants import MPH, RPM
+from pitching_machine.machine import Machine, MachineConfig, calibrate, launch, nip_angle, quat_to_mat, settings_for
 
 
 def parked_ball_stiffness(contact_model, squeeze=0.008):
@@ -91,7 +91,7 @@ def test_mujoco_sensors_see_the_launch():
 
 def test_pybullet_port_uses_the_same_spring():
     pytest.importorskip("pybullet")
-    from knuckle.pybullet_machine import static_stiffness
+    from pitching_machine.pybullet_machine import static_stiffness
 
     cfg = MachineConfig()
     assert static_stiffness(cfg) == pytest.approx(cfg.contact_stiffness, rel=0.02)

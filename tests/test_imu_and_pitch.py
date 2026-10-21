@@ -1,13 +1,13 @@
 import numpy as np
 import pytest
 
-from knuckle.aero import Aero, random_rotations
-from knuckle.constants import INCH, MPH
-from knuckle.flight import fly
-from knuckle.imu import IMUSpec, model_residual, reconstruct, record
-from knuckle.machine import Machine
-from knuckle.pitch import ZONE_MIDDLE, preset_config, throw
-from knuckle.view import replay
+from pitching_machine.aero import Aero, random_rotations
+from pitching_machine.constants import INCH, MPH
+from pitching_machine.flight import fly
+from pitching_machine.imu import IMUSpec, model_residual, reconstruct, record
+from pitching_machine.machine import Machine
+from pitching_machine.pitch import ZONE_MIDDLE, preset_config, throw
+from pitching_machine.view import replay
 
 PERFECT = IMUSpec(gyro_noise=0, gyro_bias=0, accel_noise=0, accel_bias=0)
 
