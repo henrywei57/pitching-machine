@@ -1,1 +1,1 @@
-"""A two-wheel pitching machine in MuJoCo, from contact patch to home plate."""
+"""A three-wheel pitching machine in MuJoCo, from contact patch to home plate."""

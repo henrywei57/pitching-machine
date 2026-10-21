@@ -1,4 +1,4 @@
-"""Nine milliseconds inside the machine: how a curveball gets its speed and spin.
+"""Eight milliseconds inside the machine: how a curveball gets its speed and spin.
 
     python experiments/launch_anatomy.py
 """
@@ -18,21 +18,22 @@ def main():
     cfg = preset_config("curveball")
     res = Machine(cfg).launch(record_every=1)
     L = res.log
-    touching = (L["normal_top"] > 0) | (L["normal_bottom"] > 0)
+    wheels = range(cfg.n_wheels)
+    touching = np.any([L[f"normal_{i}"] > 0 for i in wheels], axis=0)
     t0 = L["t"][touching][0]
     t = (L["t"] - t0) * 1e3  # ms since first touch
     print(res.summary())
 
     fig, axs = plt.subplots(3, 2, figsize=(10.5, 8.2), sharex=True)
-    top_c, bot_c = SERIES[0], SERIES[1]
+    colors = SERIES[: cfg.n_wheels]
 
     ax = axs[0, 0]
-    ax.plot(t, L["top_speed"] / MPH, color=top_c)
-    ax.plot(t, L["bottom_speed"] / MPH, color=bot_c)
+    for i, c in zip(wheels, colors):
+        ax.plot(t, L[f"rim_{i}"] / MPH, color=c)
+        label_end(ax, t[-1], L[f"rim_{i}"][-1] / MPH, f"{cfg.labels[i]} rim")
     ax.plot(t, L["speed"] / MPH, color=INK)
-    label_end(ax, t[-1], L["top_speed"][-1] / MPH, "top rim")
-    label_end(ax, t[-1], L["bottom_speed"][-1] / MPH, "bottom rim")
-    label_end(ax, t[-1], L["speed"][-1] / MPH, "ball")
+    k = np.searchsorted(t, 3.5)
+    label_end(ax, t[k], L["speed"][k] / MPH, "ball", dx=6, dy=-4)
     ax.axhline(cfg.ideal_speed / MPH, color=MUTED, lw=1, ls="--")
     ax.text(t[0], cfg.ideal_speed / MPH + 2, "rigid, no-slip ideal", color=INK_2, fontsize=8)
     ax.set(title="Speed", ylabel="mph")
@@ -40,28 +41,28 @@ def main():
     ax = axs[0, 1]
     ax.plot(t, L["spin"] / RPM, color=INK)
     ax.axhline(cfg.ideal_spin / RPM, color=MUTED, lw=1, ls="--")
-    ax.text(t[0], cfg.ideal_spin / RPM + 80, "ideal: rim-speed difference / ball diameter", color=INK_2, fontsize=8)
-    ax.set(title="Spin (topspin +)", ylabel="rpm")
+    ax.text(t[0], cfg.ideal_spin / RPM + 80, "rigid, no-slip ideal", color=INK_2, fontsize=8)
+    ax.set(title=f"Spin about the {cfg.spin_axis_deg:+.0f} deg axis (topspin +)", ylabel="rpm")
 
     ax = axs[1, 0]
-    for k, c in (("top", top_c), ("bottom", bot_c)):
-        ax.plot(t, L[f"normal_{k}"], color=c)
-        ax.plot(t, L[f"friction_{k}"], color=c, ls=":", lw=1.4)
-        ax.plot(t, cfg.friction * L[f"normal_{k}"], color=c, lw=0.8, alpha=0.5)
-    i = np.argmax(L["normal_top"])
-    label_end(ax, t[i], L["normal_top"][i], "normal (squash) force", dx=6, dy=6)
-    j = np.argmax(L["friction_bottom"])
-    label_end(ax, t[j], L["friction_bottom"][j] * 0.55, "friction (dotted),\ncapped at mu N (faint)", dx=-118, dy=0)
+    for i, c in zip(wheels, colors):
+        ax.plot(t, L[f"normal_{i}"], color=c)
+        ax.plot(t, L[f"friction_{i}"], color=c, ls=":", lw=1.4)
+        ax.plot(t, cfg.friction * L[f"normal_{i}"], color=c, lw=0.8, alpha=0.5)
+    k = np.argmax(L["normal_0"])
+    label_end(ax, t[k], L["normal_0"][k], "normal (squash) force", dx=6, dy=6)
+    k = np.argmax(L["friction_0"])
+    label_end(ax, t[k], L["friction_0"][k] * 0.55, "friction (dotted),\ncapped at mu N (faint)", dx=-118, dy=0)
     ax.set(title="Contact forces", ylabel="N")
 
     ax = axs[1, 1]
-    for k, c in (("top", top_c), ("bottom", bot_c)):
-        ax.plot(t, 1e3 * L[f"squash_{k}"], color=c)
+    for i, c in zip(wheels, colors):
+        ax.plot(t, 1e3 * L[f"squash_{i}"], color=c)
     ax.set(title="Squash (tire and ball overlap)", ylabel="mm")
 
     ax = axs[2, 0]
-    for k, c in (("top", top_c), ("bottom", bot_c)):
-        ax.plot(t, L[f"slip_{k}"] / MPH, color=c)
+    for i, c in zip(wheels, colors):
+        ax.plot(t, L[f"slip_{i}"] / MPH, color=c)
     ax.set(title="Slip at each contact", ylabel="mph", xlabel="ms since the ball first touched the tires")
 
     ax = axs[2, 1]
@@ -72,12 +73,13 @@ def main():
     ax.set(title="What an IMU inside the ball feels", ylabel="g", xlabel="ms since the ball first touched the tires")
 
     for ax in axs.flat:
-        ax.set_xlim(t[0] - 1, t[-1] + 2.6)
-    handles = [Line2D([], [], color=top_c), Line2D([], [], color=bot_c), Line2D([], [], color=INK)]
-    fig.legend(handles, ["top wheel", "bottom wheel", "ball"], loc="upper left", ncol=3, bbox_to_anchor=(0.01, 0.955))
+        ax.set_xlim(t[0] - 1, t[-1] + 3.4)
+    handles = [Line2D([], [], color=c) for c in colors] + [Line2D([], [], color=INK)]
+    fig.legend(handles, [f"{lab} wheel" for lab in cfg.labels] + ["ball"], loc="upper left", ncol=4,
+               bbox_to_anchor=(0.01, 0.955))
     fig.suptitle(
         f"A curveball launch: {res.speed / MPH:.1f} mph and {res.signed_spin / RPM:.0f} rpm out of "
-        f"{cfg.top_rpm:.0f} / {cfg.bottom_rpm:.0f} rpm wheels",
+        + " / ".join(f"{rpm:.0f}" for rpm in cfg.wheel_rpm) + " rpm wheels",
         x=0.01, ha="left", fontsize=12, fontweight="bold", y=0.995,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.93))

@@ -5,10 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pitching-machine"
 version = "0.1.0"
-description = "A two-wheel pitching machine in MuJoCo, with seam-dependent knuckleball aerodynamics and a virtual instrumented baseball."
+description = "A three-wheel pitching machine in MuJoCo, with seam-dependent knuckleball aerodynamics and a virtual instrumented baseball."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
 authors = [{ name = "Henry Wei" }]
 dependencies = ["mujoco>=3.1", "numpy>=1.24", "scipy>=1.10", "matplotlib>=3.7"]
 

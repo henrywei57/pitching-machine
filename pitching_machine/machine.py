@@ -1,19 +1,27 @@
-"""A two-wheel pitching machine in MuJoCo.
+"""A three-wheel pitching machine in MuJoCo.
 
-Nothing here hands the ball a spin rate. The wheels are driven by speed-
-controlled motors, the ball is fed into the gap between them, and whatever
-speed and spin it leaves with comes out of the contact: the tire and ball
-squash into each other, friction can only push as hard as mu times the
+Three tires sit 120 degrees apart around the ball's path, like a Hack Attack
+style machine: one on top, two lower ones on the third-base and first-base
+sides. Nothing here hands the ball a spin rate. The wheels are driven by
+speed-controlled motors, the ball is fed into the gap between them, and
+whatever speed and spin it leaves with comes out of the contact: the tires and
+ball squash into each other, friction can only push as hard as mu times the
 squash force, and the wheels have real inertia, so they slow down a little as
 they give up energy to the ball.
+
+With three wheels the rigid, no-slip kinematics fix the ball's speed, spin
+rate and spin direction from the three rim speeds, so a curveball that breaks
+sideways comes from the wheel speeds alone. A two-wheel machine (set
+wheel_angles_deg=TWO_WHEEL) can only spin the ball about one axis and has to
+rotate its head (tilt_deg) for anything else.
 
 Contact models
 --------------
 "coulomb" (default): an explicit tire-ball contact law. The normal force is a
 spring-damper on the overlap (the squash). Friction is solved every step as
-Coulomb friction: the two contact impulses that would make both contacts
-stick, projected back onto the friction cone |F_t| <= mu F_n when that asks
-for too much. MuJoCo integrates the wheels, motors and ball.
+Coulomb friction: the contact impulses that would make every contact stick,
+projected back onto the friction cone |F_t| <= mu F_n when that asks for too
+much. MuJoCo integrates the wheels, motors and ball.
 
 "mujoco": MuJoCo's own soft-constraint contact. It is a good contact model for
 robots, but its normal force is not a spring: the solver trades normal force
@@ -27,10 +35,9 @@ World: x points from the machine toward home plate, z is up, y is the
 first-base side (the pitcher's left when facing the plate).
 
 Head: the wheel assembly. Its x axis is the barrel (the ball's path through
-the wheels). With tilt = 0 the "top" wheel sits above the ball and the
-"bottom" wheel below it, both axles along head y. Tilting the head about the
-barrel tilts the spin axis, exactly like rotating the head of a real machine
-to throw a pitch that breaks sideways.
+the wheels). A wheel at angle theta sits in direction (0, cos theta, sin theta)
+from the barrel: 90 is the top, 210 lower on the 3B side, 330 lower on the 1B
+side, 270 the bottom.
 """
 
 from dataclasses import dataclass, field, replace
@@ -42,11 +49,35 @@ from .constants import BALL_INERTIA, BALL_MASS, BALL_RADIUS, INCH, MPH, PLATE_DI
 from .seams import seam_points
 
 
+THREE_WHEEL = (90.0, 210.0, 330.0)  # top, lower 3B side, lower 1B side
+TWO_WHEEL = (90.0, 270.0)  # top and bottom
+
+
+def wheel_label(theta_deg):
+    t = theta_deg % 360
+    if abs(t - 90) < 1:
+        return "top"
+    if abs(t - 270) < 1:
+        return "bottom"
+    vert = "upper" if np.sin(np.radians(t)) > 0 else "lower"
+    side = "1B" if np.cos(np.radians(t)) > 0 else "3B"
+    return f"{vert} {side}"
+
+
+def _wrap_axis(phi, s):
+    """Spin direction phi (deg) and signed rate s -> phi in (-90, 90], s carrying the sign."""
+    if phi > 90:
+        phi, s = phi - 180, -s
+    elif phi <= -90:
+        phi, s = phi + 180, -s
+    return phi, s
+
+
 @dataclass
 class MachineConfig:
-    top_rpm: float = 1800.0
-    bottom_rpm: float = 1800.0
-    tilt_deg: float = 0.0  # head rotation about the barrel; + rolls the top wheel toward 3B (-y)
+    wheel_rpm: tuple = (1800.0, 1800.0, 1800.0)
+    wheel_angles_deg: tuple = THREE_WHEEL
+    tilt_deg: float = 0.0  # head rotation about the barrel (only a two-wheel machine needs it)
     elevation_deg: float = 0.0  # barrel angle above horizontal
     azimuth_deg: float = 0.0  # barrel angle toward 1B (+y)
     release_height: float = 1.75  # m, barrel height above the floor
@@ -64,7 +95,7 @@ class MachineConfig:
 
     # Contact between tire and ball.
     contact_model: str = "coulomb"  # or "mujoco"
-    squeeze: float = 0.0127  # m (half an inch) of interference per wheel: (ball diameter - wheel gap) / 2
+    squeeze: float = 0.0127  # m (half an inch) of interference per tire
     friction: float = 0.7  # sliding friction, rubber tire on leather
     contact_stiffness: float = 1.3e5  # N/m per contact; tire and ball squashing together
     contact_damping: float = 60.0  # N s/m; hysteresis in the rubber and the ball
@@ -72,43 +103,82 @@ class MachineConfig:
     feed_speed: float = 1.5  # m/s; how fast the chute rolls the ball into the wheels
     ball_quat: tuple = (1.0, 0.0, 0.0, 0.0)  # seam orientation in the chute (w, x, y, z), head frame
 
-    timestep: float = 1e-5  # s; contact lasts ~5 ms, so it needs small steps
+    timestep: float = 1e-5  # s; contact lasts ~10 ms, so it needs small steps
     max_time: float = 0.06  # s; give up if the ball never comes out
+
+    def __post_init__(self):
+        if len(self.wheel_rpm) != len(self.wheel_angles_deg):
+            raise ValueError("need one wheel_rpm per wheel angle")
 
     def with_(self, **kw):
         return replace(self, **kw)
 
-    # Ideal (rigid, no-slip) kinematics -------------------------------------------
     @property
-    def top_surface_speed(self):
-        return self.top_rpm * RPM * self.wheel_radius
+    def n_wheels(self):
+        return len(self.wheel_angles_deg)
 
     @property
-    def bottom_surface_speed(self):
-        return self.bottom_rpm * RPM * self.wheel_radius
+    def labels(self):
+        return [wheel_label(t) for t in self.wheel_angles_deg]
+
+    # Ideal (rigid, no-slip) kinematics -------------------------------------------
+    @property
+    def surface_speeds(self):
+        return np.array(self.wheel_rpm) * RPM * self.wheel_radius
+
+    def _ideal(self):
+        """(speed, spin direction in deg, signed spin in rad/s) for a rigid ball that
+        doesn't slip. Each tire's rim speed must equal the ball's surface speed
+        where it touches: V_i = v + r (w_y sin theta_i - w_z cos theta_i).
+        Two wheels leave w_z free; the minimum-norm answer sets it to zero."""
+        th = np.radians(self.wheel_angles_deg)
+        A = np.stack([np.ones_like(th), BALL_RADIUS * np.sin(th), -BALL_RADIUS * np.cos(th)], axis=1)
+        v, wy, wz = np.linalg.lstsq(A, self.surface_speeds, rcond=None)[0]
+        s = np.hypot(wy, wz)
+        if s < 1e-9:
+            return v, 0.0, 0.0
+        return (v, *_wrap_axis(np.degrees(np.arctan2(wz, wy)), s))
 
     @property
     def ideal_speed(self):
-        """Ball speed if it left the wheels rigidly, with no slip: the average surface speed."""
-        return 0.5 * (self.top_surface_speed + self.bottom_surface_speed)
+        return self._ideal()[0]
 
     @property
     def ideal_spin(self):
-        """Spin (rad/s) if it left rigidly: surface-speed difference over the ball diameter.
-        Positive is topspin for tilt = 0."""
-        return (self.top_surface_speed - self.bottom_surface_speed) / (2.0 * BALL_RADIUS)
+        """Signed spin (rad/s) about spin_axis_head: + topspin-like, - backspin-like."""
+        return self._ideal()[2]
+
+    @property
+    def spin_axis_deg(self):
+        """Direction of the ideal spin axis in the head's y-z plane: 0 is pure top/backspin,
+        + turns it so the ball also breaks toward first base."""
+        return self._ideal()[1]
+
+    @property
+    def spin_axis_head(self):
+        phi = np.radians(self.spin_axis_deg)
+        return np.array([0.0, np.cos(phi), np.sin(phi)])
 
 
-def settings_for(speed_mph, spin_rpm, wheel_radius=MachineConfig.wheel_radius, **kw):
-    """Wheel rpms a naive operator would dial in for a target speed and spin.
+def settings_for(speed_mph, spin_rpm, axis_deg=0.0, wheel_angles_deg=THREE_WHEEL,
+                 wheel_radius=MachineConfig.wheel_radius, tilt_deg=0.0, **kw):
+    """Wheel rpms a naive operator would dial in for a target speed, spin and spin axis.
 
-    Positive spin_rpm is topspin (top wheel faster), negative is backspin.
-    This inverts the ideal kinematics, so the real machine will come up short.
+    Positive spin_rpm is topspin, negative is backspin; axis_deg turns the spin
+    axis so the ball also breaks toward first base (+) or third base (-). This
+    inverts the ideal kinematics, so the real machine will come up short.
+    Three wheels make any axis from speeds alone; two wheels tilt the head.
     """
     v = speed_mph * MPH
-    dv = spin_rpm * RPM * BALL_RADIUS
-    to_rpm = 1.0 / (RPM * wheel_radius)
-    return MachineConfig(top_rpm=(v + dv) * to_rpm, bottom_rpm=(v - dv) * to_rpm, wheel_radius=wheel_radius, **kw)
+    rs = spin_rpm * RPM * BALL_RADIUS
+    th = np.radians(wheel_angles_deg)
+    spans = np.linalg.matrix_rank(np.stack([np.ones_like(th), np.sin(th), np.cos(th)], axis=1)) == 3
+    phi = np.radians(axis_deg) if spans else 0.0
+    if not spans:
+        tilt_deg = tilt_deg + axis_deg
+    V = v + rs * np.sin(th - phi)
+    return MachineConfig(wheel_rpm=tuple(V / (RPM * wheel_radius)), wheel_angles_deg=tuple(wheel_angles_deg),
+                         wheel_radius=wheel_radius, tilt_deg=tilt_deg, **kw)
 
 
 # ----------------------------------------------------------------------------------
@@ -167,19 +237,29 @@ def _skew(v):
 # ----------------------------------------------------------------------------------
 
 
+def wheel_dirs(cfg):
+    """Unit vectors (head frame) from the barrel to each wheel, and each wheel's axle.
+    The axle d x x makes the wheel turn the "same way" for every wheel: a negative
+    angular velocity about it drives the tire surface toward the plate."""
+    th = np.radians(cfg.wheel_angles_deg)
+    d = np.stack([np.zeros_like(th), np.cos(th), np.sin(th)], axis=1)
+    a = np.cross(d, [1.0, 0.0, 0.0])
+    return d, a
+
+
 def wheel_offset(cfg):
     """Distance from the barrel axis to each wheel's axle."""
     return cfg.wheel_radius + BALL_RADIUS - cfg.squeeze
 
 
 def entry_x(cfg):
-    """Head-frame x where the ball first touches both wheels."""
+    """Head-frame x where the ball first touches the tires."""
     rsum = cfg.wheel_radius + BALL_RADIUS
     return -np.sqrt(rsum**2 - wheel_offset(cfg) ** 2)
 
 
 def nip_angle(cfg):
-    """Angle between the contact normal and the wheel-to-wheel line at first touch.
+    """Angle between the contact normal and the barrel's cross-section at first touch.
     A rolling mill only grabs its stock if mu > tan(nip angle); so does this."""
     return np.arccos(wheel_offset(cfg) / (cfg.wheel_radius + BALL_RADIUS))
 
@@ -187,34 +267,33 @@ def nip_angle(cfg):
 def build_mjcf(cfg, scene=False, plate_distance=PLATE_DISTANCE):
     """MJCF text for the machine and ball.
 
-    scene=True adds the field dressing (mound, plate, strike zone) used for
-    rendering; it has no effect on the launch.
+    scene=True adds the field dressing (mound, plate, strike zone) and the
+    machine's frame and motors, used for rendering; none of it collides.
     """
     R_head = head_rotation(cfg)
     c = wheel_offset(cfg)
+    dirs, axles = wheel_dirs(cfg)
     Rw, ww = cfg.wheel_radius, cfg.wheel_width
+    n = cfg.n_wheels
     # Inertia about a diameter: half the axle inertia (thin ring) plus the width term.
     # Nothing in the launch depends on it; it just has to be physically valid.
     Ip = 0.5 * cfg.wheel_inertia + cfg.wheel_mass * ww**2 / 12.0
+    nocollide = 'contype="0" conaffinity="0"'
 
     pairs = ""
     if cfg.contact_model == "mujoco":
         # With a constant impedance of 0.5 and solref = (-k, -b), a ball pinched
-        # between two fixed axles feels 2 m (k r + b v) at each contact when
-        # nothing slides (measured; tests/test_machine.py checks it), so divide by 2m.
+        # between fixed axles feels 2 m (k r + b v) at each contact when nothing
+        # slides (measured; tests/test_machine.py checks it), so divide by 2m.
         k, b = cfg.contact_stiffness / (2 * BALL_MASS), cfg.contact_damping / (2 * BALL_MASS)
         attrs = (
             f'condim="3" friction="{cfg.friction} {cfg.friction} 0.005 0.0001 0.0001" '
             f'solref="{-k:.9g} {-b:.9g}" solimp="0.5 0.5 0.001 0.5 2"'
         )
-        pairs = f"""
-  <contact>
-    <pair name="top_pinch" geom1="ball" geom2="top_tire" {attrs}/>
-    <pair name="bottom_pinch" geom1="ball" geom2="bottom_tire" {attrs}/>
-  </contact>"""
+        pairs = "\n  <contact>\n" + "".join(
+            f'    <pair geom1="ball" geom2="tire{i}" {attrs}/>\n' for i in range(n)) + "  </contact>"
     elif cfg.contact_model != "coulomb":
         raise ValueError(f"unknown contact_model {cfg.contact_model!r}")
-    nocollide = 'contype="0" conaffinity="0"'
 
     # Red stitches so you can see the ball turn (visual only: no mass, no collisions).
     stitches = "\n      ".join(
@@ -225,12 +304,21 @@ def build_mjcf(cfg, scene=False, plate_distance=PLATE_DISTANCE):
 
     frame = field = ""
     if scene:
-        side = c + Rw + 0.03
-        frame = f"""
-      <geom type="box" pos="-0.02 0 {side}" size="0.20 {ww * 0.9} 0.012" rgba="0.15 0.25 0.55 1" {nocollide}/>
-      <geom type="box" pos="-0.02 0 {-side}" size="0.20 {ww * 0.9} 0.012" rgba="0.15 0.25 0.55 1" {nocollide}/>
-      <geom type="box" pos="-0.02 {ww * 0.9} 0" size="0.20 0.008 {side + 0.01}" rgba="0.15 0.25 0.55 0.35" {nocollide}/>
-      <geom type="capsule" fromto="-0.35 0 {-BALL_RADIUS - 0.004} {entry_x(cfg) - 0.01} 0 {-BALL_RADIUS - 0.004}" size="0.004" rgba="0.6 0.6 0.6 1" {nocollide}/>"""
+        # A motor on each axle, struts joining the motors, and the feed chute.
+        steel = 'rgba="0.15 0.25 0.55 1"'
+        parts = []
+        ends = []
+        for d, a in zip(dirs, axles):
+            hub = c * d
+            parts.append(f'<geom type="cylinder" fromto="{_fmt(hub + a * (ww / 2 + 0.005))} {_fmt(hub + a * (ww / 2 + 0.09))}" '
+                         f'size="0.032" rgba="0.22 0.22 0.24 1" {nocollide}/>')
+            ends.append(hub + a * (ww / 2 + 0.05) + d * 0.05)
+        for i in range(n if n > 2 else 1):
+            p0, p1 = ends[i], ends[(i + 1) % n]
+            parts.append(f'<geom type="capsule" fromto="{_fmt(p0)} {_fmt(p1)}" size="0.016" {steel} {nocollide}/>')
+        parts.append(f'<geom type="capsule" fromto="-0.35 0 {-BALL_RADIUS - 0.004} {entry_x(cfg) - 0.01} 0 {-BALL_RADIUS - 0.004}" '
+                     f'size="0.004" rgba="0.6 0.6 0.6 1" {nocollide}/>')
+        frame = "\n      " + "\n      ".join(parts)
         xp = plate_distance
         zw, zt, zb = 8.5 * INCH, 3.5 * 0.3048, 1.5 * 0.3048  # zone half-width, top, bottom
         zone = [((xp, -zw, zb), (xp, -zw, zt)), ((xp, zw, zb), (xp, zw, zt)),
@@ -238,29 +326,37 @@ def build_mjcf(cfg, scene=False, plate_distance=PLATE_DISTANCE):
         zone = "\n    ".join(
             f'<geom type="capsule" fromto="{_fmt(a)} {_fmt(b)}" size="0.006" rgba="1 1 1 0.55" {nocollide}/>' for a, b in zone
         )
+        low = cfg.release_height + min(c * d[2] for d in dirs) - Rw - 0.02
         field = f"""
     <geom name="mound" type="ellipsoid" pos="0 0 -0.05" size="2.7 2.7 0.30" rgba="0.62 0.42 0.27 1" {nocollide}/>
     <geom name="dirt" type="cylinder" pos="{xp + 0.2} 0 0.001" size="2.0 0.001" rgba="0.62 0.42 0.27 1" {nocollide}/>
     <geom name="plate" type="box" pos="{xp + 8.5 * INCH} 0 0.004" size="{8.5 * INCH} {8.5 * INCH} 0.004" rgba="1 1 1 1" {nocollide}/>
-    <geom name="post" type="cylinder" fromto="-0.05 0 0 -0.05 0 {cfg.release_height - c - Rw - 0.04}" size="0.035" rgba="0.2 0.2 0.22 1" {nocollide}/>
+    <geom name="post" type="cylinder" fromto="-0.05 0 0 -0.05 0 {low}" size="0.035" rgba="0.2 0.2 0.22 1" {nocollide}/>
     {zone}"""
 
     x0 = entry_x(cfg) - 0.002
     ball_pos = np.array([0, 0, cfg.release_height]) + R_head @ np.array([x0, 0, 0])
     ball_quat = mat_to_quat(R_head @ quat_to_mat(cfg.ball_quat))
 
-    def wheel(name, z):
+    def wheel(i, d, a):
+        # Wheel body frame: x along the barrel, y along the axle, z toward the wheel.
+        q = mat_to_quat(np.stack([[1.0, 0.0, 0.0], a, d], axis=1))
         return f"""
-      <body name="{name}_wheel" pos="0 0 {z}">
-        <joint name="{name}_axle" type="hinge" axis="0 1 0" damping="{cfg.bearing_damping}"/>
+      <body name="wheel{i}" pos="{_fmt(c * d)}" quat="{_fmt(q)}">
+        <joint name="axle{i}" type="hinge" axis="0 1 0" damping="{cfg.bearing_damping}"/>
         <inertial pos="0 0 0" mass="{cfg.wheel_mass}" diaginertia="{Ip} {cfg.wheel_inertia} {Ip}"/>
-        <geom name="{name}_tire" type="cylinder" size="{Rw} {ww / 2}" euler="1.5707963 0 0" material="tire" {nocollide}/>
+        <geom name="tire{i}" type="cylinder" size="{Rw} {ww / 2}" euler="1.5707963 0 0" material="tire" {nocollide}/>
         <geom type="box" size="{Rw * 0.75} {ww / 2 + 0.002} 0.012" material="hub" {nocollide} mass="0"/>
         <geom type="box" size="0.012 {ww / 2 + 0.002} {Rw * 0.75}" material="hub" {nocollide} mass="0"/>
       </body>"""
 
+    wheels = "".join(wheel(i, d, a) for i, (d, a) in enumerate(zip(dirs, axles)))
+    motors = "\n    ".join(
+        f'<velocity name="motor{i}" joint="axle{i}" kv="{cfg.motor_kv}" forcerange="{-cfg.motor_torque} {cfg.motor_torque}"/>'
+        for i in range(n))
+
     return f"""
-<mujoco model="two_wheel_pitching_machine">
+<mujoco model="{n}_wheel_pitching_machine">
   <compiler angle="radian" autolimits="true"/>
   <option timestep="{cfg.timestep}" gravity="0 0 -9.81" integrator="implicitfast" cone="elliptic" impratio="10"/>
   <visual>
@@ -278,7 +374,7 @@ def build_mjcf(cfg, scene=False, plate_distance=PLATE_DISTANCE):
   <worldbody>
     <light pos="5 -4 12" dir="-0.2 0.3 -1" directional="true" castshadow="true" diffuse="0.6 0.6 0.6"/>
     <geom name="floor" type="plane" size="40 12 0.1" material="grass" {nocollide}/>{field}
-    <body name="head" pos="0 0 {cfg.release_height}" quat="{_fmt(mat_to_quat(R_head))}">{frame}{wheel("top", c)}{wheel("bottom", -c)}
+    <body name="head" pos="0 0 {cfg.release_height}" quat="{_fmt(mat_to_quat(R_head))}">{frame}{wheels}
     </body>
     <body name="ball" pos="{_fmt(ball_pos)}" quat="{_fmt(ball_quat)}">
       <freejoint name="ball"/>
@@ -289,8 +385,7 @@ def build_mjcf(cfg, scene=False, plate_distance=PLATE_DISTANCE):
     </body>
   </worldbody>{pairs}
   <actuator>
-    <velocity name="top_motor" joint="top_axle" kv="{cfg.motor_kv}" forcerange="{-cfg.motor_torque} {cfg.motor_torque}"/>
-    <velocity name="bottom_motor" joint="bottom_axle" kv="{cfg.motor_kv}" forcerange="{-cfg.motor_torque} {cfg.motor_torque}"/>
+    {motors}
   </actuator>
   <sensor>
     <gyro name="gyro" site="imu"/>
@@ -304,8 +399,8 @@ def build_mjcf(cfg, scene=False, plate_distance=PLATE_DISTANCE):
 # Launch
 # ----------------------------------------------------------------------------------
 
-WHEELS = ("top", "bottom")
-LOG_KEYS = ("t", "x", "speed", "spin", "top_speed", "bottom_speed", "gyro", "accel")
+LOG_KEYS = ("t", "x", "speed", "spin", "gyro", "accel")
+# Per wheel i: rim_i, normal_i, friction_i, squash_i, slip_i.
 CONTACT_KEYS = ("normal", "friction", "squash", "slip")
 
 
@@ -336,8 +431,16 @@ class LaunchResult:
 
     @property
     def signed_spin(self):
-        """Spin about the head's topspin axis (rad/s): + topspin, - backspin."""
-        return float(self.omega @ (head_rotation(self.config) @ np.array([0.0, 1.0, 0.0])))
+        """Spin (rad/s) about the axis the wheel speeds ask for: + topspin-like, - backspin-like."""
+        return float(self.omega @ (head_rotation(self.config) @ self.config.spin_axis_head))
+
+    @property
+    def spin_axis_deg(self):
+        """Direction the ball actually spins about, in the same convention as the config."""
+        w = head_rotation(self.config).T @ self.omega
+        if np.hypot(w[1], w[2]) < 1e-6:
+            return 0.0
+        return _wrap_axis(np.degrees(np.arctan2(w[2], w[1])), 1.0)[0]
 
     @property
     def speed_efficiency(self):
@@ -350,10 +453,12 @@ class LaunchResult:
 
     def summary(self):
         c = self.config
+        rpms = "   ".join(f"{lab} {rpm:.0f}" for lab, rpm in zip(c.labels, c.wheel_rpm))
+        rims = " / ".join(f"{v / MPH:.1f}" for v in c.surface_speeds)
+        axis = f"   axis {c.spin_axis_deg:+.0f} deg" if abs(c.ideal_spin) > 100 * RPM and abs(c.spin_axis_deg) > 0.5 else ""
         lines = [
-            f"wheels       top {c.top_rpm:6.0f} rpm   bottom {c.bottom_rpm:6.0f} rpm   "
-            f"(rim speed {c.top_surface_speed / MPH:5.1f} / {c.bottom_surface_speed / MPH:5.1f} mph)",
-            f"ideal exit   {c.ideal_speed / MPH:6.1f} mph   {c.ideal_spin / RPM:+6.0f} rpm",
+            f"wheels       {rpms} rpm   (rims {rims} mph)",
+            f"ideal exit   {c.ideal_speed / MPH:6.1f} mph   {c.ideal_spin / RPM:+6.0f} rpm{axis}",
         ]
         if not self.exited:
             lines.append("ball never left the wheels (stalled, or spat back out of the nip)")
@@ -361,9 +466,10 @@ class LaunchResult:
         eff = f"{100 * self.speed_efficiency:.1f}% of ideal speed"
         if np.isfinite(self.spin_efficiency) and abs(c.ideal_spin) > 100 * RPM:
             eff += f", {100 * self.spin_efficiency:.1f}% of ideal spin"
+        axis = f"   axis {self.spin_axis_deg:+.0f} deg" if axis else ""
         L = self.log
         lines += [
-            f"actual exit  {self.speed / MPH:6.1f} mph   {self.signed_spin / RPM:+6.0f} rpm   ({eff})",
+            f"actual exit  {self.speed / MPH:6.1f} mph   {self.signed_spin / RPM:+6.0f} rpm{axis}   ({eff})",
             f"contact      {1e3 * L['contact_time']:.2f} ms   peak squash {1e3 * L['peak_squash']:.1f} mm   "
             f"peak normal force {L['peak_normal']:.0f} N   slipping {100 * L['slip_fraction']:.0f}% of the time   "
             f"wheels slowed {L['wheel_drop_pct']:.1f}%",
@@ -379,32 +485,31 @@ class Machine:
         self.model = mujoco.MjModel.from_xml_string(build_mjcf(cfg, scene=scene))
         self.data = mujoco.MjData(self.model)
         m = self.model
+        self.wheels = range(cfg.n_wheels)
         self.ball_body = m.body("ball").id
         self.ball_geom = m.geom("ball").id
-        self.tire_geoms = {m.geom("top_tire").id: "top", m.geom("bottom_tire").id: "bottom"}
-        self.wheel_bodies = {k: m.body(f"{k}_wheel").id for k in WHEELS}
-        self.dadr = {k: m.jnt_dofadr[m.joint(f"{k}_axle").id] for k in WHEELS}
-        self.qadr = {k: m.jnt_qposadr[m.joint(f"{k}_axle").id] for k in WHEELS}
+        self.tire_geoms = {m.geom(f"tire{i}").id: i for i in self.wheels}
+        self.wheel_bodies = [m.body(f"wheel{i}").id for i in self.wheels]
+        self.dadr = [m.jnt_dofadr[m.joint(f"axle{i}").id] for i in self.wheels]
+        self.qadr = [m.jnt_qposadr[m.joint(f"axle{i}").id] for i in self.wheels]
         self.ball_qadr = m.jnt_qposadr[m.joint("ball").id]
         self.ball_dadr = m.jnt_dofadr[m.joint("ball").id]
         self.R_head = head_rotation(cfg)
         self.contacts = {}
         self.reset()
 
-    # Wheel angular velocity about its axle (rad/s). The bottom wheel turns the
-    # opposite way so both surfaces push the ball toward the plate.
     @property
     def wheel_targets(self):
-        c = self.cfg
-        return {"top": -c.top_rpm * RPM, "bottom": c.bottom_rpm * RPM}
+        """Wheel angular velocity about its axle (rad/s); negative drives the tire toward the plate."""
+        return -np.array(self.cfg.wheel_rpm) * RPM
 
     def reset(self):
         m, d = self.model, self.data
         mujoco.mj_resetData(m, d)
         tgt = self.wheel_targets
-        for k in WHEELS:
-            d.qvel[self.dadr[k]] = tgt[k]  # wheels already up to speed, as on a real machine
-        d.ctrl[:] = [tgt["top"], tgt["bottom"]]
+        for i in self.wheels:
+            d.qvel[self.dadr[i]] = tgt[i]  # wheels already up to speed, as on a real machine
+        d.ctrl[:] = tgt
         d.qvel[self.ball_dadr : self.ball_dadr + 3] = self.R_head @ np.array([self.cfg.feed_speed, 0, 0])
         mujoco.mj_forward(m, d)
         self.contacts = {}
@@ -431,7 +536,7 @@ class Machine:
         self.contacts = {}
 
         cons = []
-        for i, k in enumerate(WHEELS):
+        for k in self.wheels:
             wb = self.wheel_bodies[k]
             cw = d.xpos[wb]
             axis = d.xmat[wb].reshape(3, 3)[:, 1].copy()
@@ -451,7 +556,7 @@ class Machine:
             t1 = _cross(axis, n)  # along the direction of travel
             T = np.stack([t1, _cross(n, t1)])  # tangent basis (second row: across the tire)
             # Wheel angular acceleration from everything except friction.
-            tau = min(max(cfg.motor_kv * (d.ctrl[i] - w), -cfg.motor_torque), cfg.motor_torque)
+            tau = min(max(cfg.motor_kv * (d.ctrl[k] - w), -cfg.motor_torque), cfg.motor_torque)
             alpha_w = (tau - cfg.bearing_damping * w) / cfg.wheel_inertia
             cons.append((k, n, fn, r_b, r_w, u, slip, T, alpha_w, axis, squash))
         if not cons:
@@ -550,9 +655,10 @@ class Machine:
         self.reset()
         R_hT = self.R_head.T
         origin = np.array([0, 0, cfg.release_height])
-        log = {k: [] for k in LOG_KEYS + tuple(f"{q}_{w}" for q in CONTACT_KEYS for w in WHEELS)}
-        w0 = {k: abs(d.qvel[self.dadr[k]]) for k in WHEELS}
-        wmin = dict(w0)
+        log = {k: [] for k in LOG_KEYS + tuple(f"{q}_{i}" for q in ("rim",) + CONTACT_KEYS for i in self.wheels)}
+        w0 = [abs(d.qvel[self.dadr[i]]) for i in self.wheels]
+        wmin = list(w0)
+        axis = self.R_head @ cfg.spin_axis_head
         first_touch = last_touch = None
         steps = slipping = 0
         exited = False
@@ -566,21 +672,21 @@ class Machine:
                 first_touch = d.time if first_touch is None else first_touch
                 last_touch = d.time
                 slipping += any(v[3] > 0.05 for v in con.values())
-            for k in WHEELS:
-                wmin[k] = min(wmin[k], abs(d.qvel[self.dadr[k]]))
+            for i in self.wheels:
+                wmin[i] = min(wmin[i], abs(d.qvel[self.dadr[i]]))
             left = first_touch is not None and not con
             if steps % record_every == 0 or left:
                 log["t"].append(d.time)
                 log["x"].append(xh)
                 log["speed"].append(np.linalg.norm(vel))
-                log["spin"].append(omega @ self.R_head[:, 1])
+                log["spin"].append(omega @ axis)
                 # MuJoCo's own IMU sensors at the ball's center (body frame).
                 log["gyro"].append(d.sensor("gyro").data.copy())
                 log["accel"].append(d.sensor("accel").data.copy())
-                for k in WHEELS:
-                    log[f"{k}_speed"].append(abs(d.qvel[self.dadr[k]]) * cfg.wheel_radius)
-                    for q, v in zip(CONTACT_KEYS, con.get(k, (0.0, 0.0, 0.0, np.nan))):
-                        log[f"{q}_{k}"].append(v)
+                for i in self.wheels:
+                    log[f"rim_{i}"].append(abs(d.qvel[self.dadr[i]]) * cfg.wheel_radius)
+                    for q, v in zip(CONTACT_KEYS, con.get(i, (0.0, 0.0, 0.0, np.nan))):
+                        log[f"{q}_{i}"].append(v)
             if left and xh > 0:
                 exited = True
                 break
@@ -591,9 +697,9 @@ class Machine:
         contact_steps = max(1, round((last_touch - first_touch) / cfg.timestep)) if touched else 1
         log["contact_time"] = (last_touch - first_touch) if touched else 0.0
         log["slip_fraction"] = slipping / contact_steps
-        log["peak_squash"] = float(max(log[f"squash_{k}"].max(initial=0) for k in WHEELS))
-        log["peak_normal"] = float(max(log[f"normal_{k}"].max(initial=0) for k in WHEELS))
-        log["wheel_drop_pct"] = 100.0 * max((w0[k] - wmin[k]) / w0[k] if w0[k] > 0 else 0.0 for k in WHEELS)
+        log["peak_squash"] = float(max(log[f"squash_{i}"].max(initial=0) for i in self.wheels))
+        log["peak_normal"] = float(max(log[f"normal_{i}"].max(initial=0) for i in self.wheels))
+        log["wheel_drop_pct"] = 100.0 * max((w0[i] - wmin[i]) / w0[i] if w0[i] > 0 else 0.0 for i in self.wheels)
         pos, vel, omega, quat = self.ball_state()
         return LaunchResult(cfg, exited, pos, vel, omega, quat, d.time, log)
 
@@ -602,7 +708,7 @@ def launch(cfg: MachineConfig, **kw) -> LaunchResult:
     return Machine(cfg).launch(**kw)
 
 
-def calibrate(speed_mph, spin_rpm, iterations=6, tol=0.003, max_rpm=6000.0, **kw):
+def calibrate(speed_mph, spin_rpm, axis_deg=0.0, iterations=6, tol=0.003, max_rpm=6000.0, **kw):
     """Find wheel rpms that actually deliver a target speed and spin.
 
     This is what an operator does with a radar gun and a spin tracker: dial in
@@ -616,8 +722,8 @@ def calibrate(speed_mph, spin_rpm, iterations=6, tol=0.003, max_rpm=6000.0, **kw
     scale = np.array([target[0], max(abs(target[1]), 200 * RPM)])
 
     def measure(x):
-        cfg = settings_for(x[0] / MPH, x[1] / RPM, **kw)
-        if max(cfg.top_rpm, cfg.bottom_rpm) > max_rpm or min(cfg.top_rpm, cfg.bottom_rpm) < 0:
+        cfg = settings_for(x[0] / MPH, x[1] / RPM, axis_deg, **kw)
+        if max(cfg.wheel_rpm) > max_rpm or min(cfg.wheel_rpm) < 0:
             return None, None
         r = launch(cfg)
         return (np.array([r.speed, r.signed_spin]), r) if r.exited else (None, None)

@@ -2,18 +2,19 @@ import numpy as np
 import pytest
 
 from pitching_machine.constants import MPH, RPM
-from pitching_machine.machine import Machine, MachineConfig, calibrate, launch, nip_angle, quat_to_mat, settings_for
+from pitching_machine.machine import (TWO_WHEEL, Machine, MachineConfig, calibrate, launch, nip_angle, quat_to_mat,
+                                      settings_for)
 
 
 def parked_ball_stiffness(contact_model, squeeze=0.008):
     """Normal force / squash with the ball sitting still in the pinch."""
-    cfg = MachineConfig(top_rpm=0, bottom_rpm=0, feed_speed=0, squeeze=squeeze, contact_model=contact_model)
+    cfg = MachineConfig(wheel_rpm=(0, 0, 0), feed_speed=0, squeeze=squeeze, contact_model=contact_model)
     m = Machine(cfg)
     m.model.opt.gravity[:] = 0
     m.data.qpos[m.ball_qadr : m.ball_qadr + 3] = [0, 0, cfg.release_height]
     for _ in range(20000):
         m.step()
-    fn, _, squash, _ = m.contacts["top"]
+    fn, _, squash, _ = m.contacts[0]
     return fn / squash, cfg.contact_stiffness
 
 
@@ -23,10 +24,13 @@ def test_contact_spring_is_what_the_config_says(contact_model):
     assert k == pytest.approx(want, rel=0.02)
 
 
-def test_settings_for_inverts_the_ideal_kinematics():
-    cfg = settings_for(84.0, -1900.0)
+@pytest.mark.parametrize("wheels", [None, TWO_WHEEL])
+def test_settings_for_inverts_the_ideal_kinematics(wheels):
+    kw = {} if wheels is None else {"wheel_angles_deg": wheels}
+    cfg = settings_for(84.0, -1900.0, 25.0 if wheels is None else 0.0, **kw)
     assert cfg.ideal_speed / MPH == pytest.approx(84.0)
     assert cfg.ideal_spin / RPM == pytest.approx(-1900.0)
+    assert cfg.spin_axis_deg == pytest.approx(25.0 if wheels is None else 0.0)
 
 
 def test_equal_wheels_throw_almost_no_spin():
@@ -40,8 +44,10 @@ def test_faster_top_wheel_means_topspin_and_vice_versa():
     assert launch(settings_for(78, -2500)).signed_spin < 0
 
 
-def test_ball_leaves_slower_than_the_rims():
-    r = launch(settings_for(90, -2200))
+@pytest.mark.parametrize("wheels", [None, TWO_WHEEL])
+def test_ball_leaves_slower_than_the_rims(wheels):
+    kw = {} if wheels is None else {"wheel_angles_deg": wheels}
+    r = launch(settings_for(90, -2200, **kw))
     assert 0.85 < r.speed_efficiency < 1.0
 
 
@@ -70,10 +76,19 @@ def test_slick_tires_spit_the_ball_back_out_of_the_nip():
     assert not launch(cfg).exited
 
 
-def test_tilting_the_head_tilts_the_spin_axis():
-    r = launch(settings_for(78, 2500, tilt_deg=30))
-    axis = r.omega / np.linalg.norm(r.omega)
-    assert np.degrees(np.arctan2(axis[2], axis[1])) == pytest.approx(30, abs=1)
+@pytest.mark.parametrize("axis_deg", [-60, -20, 30, 75])
+def test_three_wheels_point_the_spin_axis_with_speeds_alone(axis_deg):
+    cfg = settings_for(78, 2200, axis_deg)
+    assert cfg.tilt_deg == 0
+    r = launch(cfg)
+    assert r.spin_axis_deg == pytest.approx(axis_deg, abs=1.5)
+
+
+def test_two_wheels_have_to_tilt_the_head():
+    cfg = settings_for(78, 2500, 30, wheel_angles_deg=TWO_WHEEL)
+    assert cfg.tilt_deg == 30
+    w = launch(cfg).omega
+    assert np.degrees(np.arctan2(w[2], w[1])) == pytest.approx(30, abs=1)
 
 
 def test_calibrate_hits_a_reachable_target():

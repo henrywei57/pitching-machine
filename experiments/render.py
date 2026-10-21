@@ -2,7 +2,7 @@
 
     python experiments/render.py            -> media/launch.gif, media/knuckleballs.gif
 
-launch.gif: a curveball going through the wheels, about 250x slow motion.
+launch.gif: a curveball going through the three wheels, about 250x slow motion.
 knuckleballs.gif: five knuckleballs from the catcher's view, identical machine
 settings, ball dropped into the chute a different way each time.
 """
@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pitching_machine.aero import Aero, random_rotations
 from pitching_machine.constants import MPH, PLATE_DISTANCE, RPM
 from pitching_machine.flight import fly
-from pitching_machine.machine import WHEELS, Machine
+from pitching_machine.machine import Machine
 from pitching_machine.pitch import preset_config, throw
 from plate_scatter import chute_composer
 
@@ -57,7 +57,7 @@ def render_launch():
     r = mujoco.Renderer(m.model, H, W)
     cam = mujoco.MjvCamera()
     cam.lookat[:] = [0.0, 0.0, cfg.release_height]
-    cam.distance, cam.azimuth, cam.elevation = 0.95, 90.0, -4.0
+    cam.distance, cam.azimuth, cam.elevation = 1.0, 205.0, -10.0  # in front of the machine, off to the 3B side
     every = 20  # 0.2 ms of sim time per frame
     frames, after = [], None
     m.reset()
@@ -70,11 +70,11 @@ def render_launch():
         if after is not None and m.data.time - after > 0.004:
             break
         r.update_scene(m.data, cam)
-        spin = omega @ m.R_head[:, 1] / RPM
+        spin = omega @ (m.R_head @ cfg.spin_axis_head) / RPM
         frames.append(caption(r.render(), [
             f"t = {1e3 * m.data.time:5.1f} ms   (~250x slow motion)",
             f"ball {np.linalg.norm(vel) / MPH:5.1f} mph   spin {spin:+5.0f} rpm",
-            f"wheels {cfg.top_rpm:.0f} / {cfg.bottom_rpm:.0f} rpm",
+            "wheels " + " / ".join(f"{rpm:.0f}" for rpm in cfg.wheel_rpm) + " rpm",
         ]))
     frames += [frames[-1]] * 20  # hold the last frame
     save_gif(frames, "launch.gif", fps=20)
@@ -99,9 +99,8 @@ def render_knuckleballs(n=5, seed=4):
     t_end = np.nanmax(f.plate_time)
     for t in np.arange(0.0, t_end + 0.12, 0.012):  # 12 ms per frame at 25 fps: about 1/3 speed
         k = min(np.searchsorted(f.t, t), len(f.t) - 1)
-        for w, sgn in zip(WHEELS, (-1, 1)):
-            rpm = res.config.top_rpm if w == "top" else res.config.bottom_rpm
-            d.qpos[m.qadr[w]] = sgn * rpm * RPM * t
+        for i in m.wheels:
+            d.qpos[m.qadr[i]] = m.wheel_targets[i] * t
         # Park the model's own ball out of sight; draw all five as scene spheres.
         d.qpos[m.ball_qadr : m.ball_qadr + 3] = [0.0, 0.0, -5.0]
         mujoco.mj_forward(m.model, d)

@@ -19,7 +19,7 @@ from pitching_machine.pitch import PRESETS, preset_config
 
 # Ordinal ramps: friction on the blue ramp (light = slick), squeeze on a neutral one.
 MU_COLOR = {0.4: "#86b6ef", 0.7: "#2a78d6", 1.0: "#104281"}
-SQUEEZE_COLOR = {0.008: "#b8b7b1", 0.010: "#7d7c77", 0.0127: INK}
+SQUEEZE_COLOR = {0.006: "#b8b7b1", 0.008: "#7d7c77", 0.0127: INK}
 GRID_LINE = "#c9c8c3"
 
 
@@ -66,18 +66,21 @@ def main():
             r = launch(preset_config("curveball", friction=mu, squeeze=sq))
             spins.append(r.signed_spin / RPM if r.exited else np.nan)
         ax.plot(mus, spins, color=color, marker="o", ms=2.5)
-        k = np.nanargmin(np.abs(np.array(spins) - 1500))  # label where the curves are apart
-        label_end(ax, mus[k], spins[k], f"{1e3 * sq:g} mm", dx=7, dy=-3)
-        if sq == 0.008:
-            gain = np.interp(1.0, mus, spins) - np.interp(0.7, mus, spins)
-            print(f"8 mm squeeze: knuckle-curve grip adds {gain:.0f} rpm over the curveball")
+        if sq == 0.0127:
+            label_end(ax, mus[-1], spins[-1], "12.7 mm squeeze (default)", dx=-4, dy=10, ha="right")
+        else:
+            k = np.nanargmin(np.abs(np.array(spins) - 1500))  # label where the curves are apart
+            left = sq == 0.008
+            label_end(ax, mus[k], spins[k], f"{1e3 * sq:g} mm squeeze", dx=-7 if left else 7, dy=0,
+                      ha="right" if left else "left")
+        gain = np.interp(1.0, mus, spins) - np.interp(0.7, mus, spins)
+        print(f"{1e3 * sq:g} mm squeeze: knuckle-curve grip adds {gain:.0f} rpm over the curveball")
     ideal = preset_config("curveball").ideal_spin / RPM
     ax.axhline(ideal, color=MUTED, lw=1, ls="--")
-    ax.text(1.31, ideal - 120, "rigid no-slip ideal", color=INK_2, fontsize=8, ha="right")
+    ax.text(0.31, ideal - 160, "rigid no-slip ideal", color=INK_2, fontsize=8, ha="left")
     for name, mu in (("curveball", 0.7), ("knuckle-curve", PRESETS["knuckle-curve"]["friction"])):
         ax.axvline(mu, color=PITCH_COLOR[name], lw=1.2)
         ax.text(mu + 0.015, 0.04, f"{name} grip", color=INK_2, fontsize=8, ha="left", va="bottom", transform=ax.get_xaxis_transform())
-    ax.text(0.04, 0.70, "squeeze per tire:", color=INK_2, fontsize=8, ha="left", transform=ax.transAxes)
     ax.set(title="Grip: same curveball wheels, more friction", xlabel="tire-leather friction coefficient", ylabel="exit spin (rpm)")
 
     fig.tight_layout()

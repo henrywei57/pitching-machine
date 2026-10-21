@@ -1,33 +1,23 @@
 # pitching-machine
 
-A two-wheel pitching machine simulated from the contact patch up, in MuJoCo.
+This is a simulation of a three-wheel pitching machine that I built in MuJoCo.
 
-Nothing here hands the ball a spin rate. The wheels are motors with inertia,
-the ball is fed into the gap between them, and whatever speed and spin it
-leaves with comes out of the contact: tire and leather squash into each other,
-friction can only push as hard as μ times that squash force, and the ball
-slips until one tire catches it. Then the ball flies through air that cares
-where its seams are.
+I wanted to see what actually happens to the ball inside a pitching machine,
+and then what happens to it on the way to the plate. The big rule I set for
+myself: the code never just *gives* the ball a spin rate. The wheels spin,
+the ball gets squeezed between them, and whatever speed and spin it comes out
+with is from the contact between the tires and the ball. Then the ball flies
+through air that cares about where its seams are.
 
 <p align="center">
-  <img src="media/launch.gif" width="49%" alt="Slow-motion launch of a curveball between two spinning wheels">
+  <img src="media/launch.gif" width="49%" alt="Slow-motion curveball going through three spinning wheels">
   <img src="media/knuckleballs.gif" width="49%" alt="Five knuckleballs from the catcher's view, each breaking a different way">
 </p>
-<p align="center"><sub>Left: a curveball going through the wheels at ~250x slow motion. Right: five knuckleballs, identical machine settings; only the way the ball sat in the chute differs.</sub></p>
+<p align="center"><sub>Left: a curveball going through the wheels in slow motion (about 250x). Right: five knuckleballs with the exact same machine settings. The only difference is how the ball was sitting in the chute.</sub></p>
 
-The project is three problems stacked on each other:
+## How to run it
 
-| | problem | where |
-|---|---|---|
-| the machine | spin comes from the difference in wheel surface speeds, and the ball leaves slower than the rims because it squashes and slips | [`pitching_machine/machine.py`](pitching_machine/machine.py) |
-| the air | drag, Magnus lift, and a seam force fit to wind-tunnel knuckleball data; a non-spinning ball has no single drag coefficient | [`pitching_machine/aero.py`](pitching_machine/aero.py), [`pitching_machine/seams.py`](pitching_machine/seams.py) |
-| the physics under both | solver choice, contact models, timestep convergence, determinism | [`experiments/compare_engines.py`](experiments/compare_engines.py), [`tests/`](tests) |
-
-And one idea that ties them together: put a virtual IMU inside the ball
-([`pitching_machine/imu.py`](pitching_machine/imu.py)) and let the ball measure the forces the
-model gets wrong.
-
-## Quick start
+You need Python 3.10 or newer.
 
 ```bash
 git clone https://github.com/henrywei57/pitching-machine.git
@@ -42,32 +32,35 @@ Throw a pitch:
 python -m pitching_machine.pitch curveball
 ```
 
+You get something like this:
+
 ```
-wheels       top   3348 rpm   bottom   1895 rpm   (rim speed  99.6 /  56.4 mph)
-ideal exit     78.0 mph    +2500 rpm
-actual exit    76.3 mph    +2614 rpm   (97.8% of ideal speed, 104.6% of ideal spin)
-contact      9.20 ms   peak squash 12.8 mm   peak normal force 1731 N   slipping 87% of the time   wheels slowed 5.3%
-aim          +2.92 deg up   -1.11 deg toward 1B
-at the plate  68.2 mph after 0.521 s   height 2.51 ft   side -0.1 in
-break        +13.3 in horizontal (+ toward 1B)   -23.4 in vertical (vs. gravity + drag only)
+wheels       top 3251   lower 3B 2622   lower 1B 1993 rpm   (rims 96.7 / 78.0 / 59.3 mph)
+ideal exit     78.0 mph    +2500 rpm   axis +30 deg
+actual exit    77.5 mph    +2635 rpm   axis +30 deg   (99.4% of ideal speed, 105.4% of ideal spin)
+contact      8.29 ms   peak squash 12.8 mm   peak normal force 1755 N   slipping 85% of the time   wheels slowed 3.5%
+aim          +6.12 deg up   -2.27 deg toward 1B
+at the plate  69.4 mph after 0.512 s   height 2.50 ft   side -0.3 in
+break        +12.8 in horizontal (+ toward 1B)   -23.6 in vertical (vs. gravity + drag only)
 ```
 
-Presets are `fastball`, `curveball`, `knuckle-curve` and `knuckleball`, or dial
-your own:
+The presets are `fastball`, `curveball`, `knuckle-curve` and `knuckleball`.
+You can also make up your own pitch:
 
 ```bash
-python -m pitching_machine.pitch --speed 85 --spin -2000 --tilt 15 --plot pitch.png
-python -m pitching_machine.pitch fastball --calibrate      # adjust the wheels until the "radar gun" agrees
-python -m pitching_machine.pitch knuckleball --seed 3      # drop the ball into the chute a different way
+python -m pitching_machine.pitch --speed 85 --spin -2000 --axis 15 --plot pitch.png
+python -m pitching_machine.pitch fastball --calibrate   # keeps adjusting the wheels until the "radar gun" says 90
+python -m pitching_machine.pitch knuckleball --seed 3   # puts the ball in the chute a different way
+python -m pitching_machine.pitch curveball --wheels 2   # the old two-wheel machine, for comparison
 ```
 
-Watch it in MuJoCo's viewer (slow-motion launch, then the flight, on a loop):
+To watch it in MuJoCo's 3D viewer:
 
 ```bash
-mjpython -m pitching_machine.view knuckleball     # macOS; use plain python on Linux/Windows
+mjpython -m pitching_machine.view knuckleball   # on a Mac. Use plain python on Windows/Linux
 ```
 
-Run the tests (31, about 20 s) and rebuild every figure in this README:
+To run the tests (37 of them, about 30 seconds) and remake every graph and GIF here:
 
 ```bash
 pytest
@@ -76,214 +69,239 @@ for s in launch_anatomy contact_sweep fit_seam_model plate_scatter instrumented_
 done
 ```
 
-`compare_engines.py` also wants PyBullet (`pip install -e ".[bullet]"`). On
-macOS with Apple's command-line tools, its source build may need
-`SDKROOT=$(xcrun --show-sdk-path)`.
+`compare_engines.py` also needs PyBullet (`pip install -e ".[bullet]"`). On my
+Mac it wouldn't build until I ran `export SDKROOT=$(xcrun --show-sdk-path)` first.
 
-## 1. The machine
+## The machine
 
-Two 10-inch tires, one above the ball and one below, on axles with real
-inertia, driven by speed-controlled motors with a torque limit. With the head
-untilted, a faster top wheel gives topspin and a faster bottom wheel gives
-backspin. Tilting the head about the barrel tilts the spin axis, as on a real
-machine.
+There are three 10-inch tires spaced 120° apart around the path of the ball:
+one on top, and two lower ones on the third-base side and the first-base side.
+Each one has its own motor. The tires are squeezed half an inch into the ball.
 
-The rigid textbook answer is
+The reason for three wheels instead of two is that three wheels can spin the
+ball around **any** axis just by changing the wheel speeds. With two wheels
+(top and bottom) you can only get topspin or backspin, and to throw anything
+that breaks sideways you have to physically rotate the whole head. If the
+ball didn't slip, the math would be:
 
 ```
-ball speed = (V_top + V_bottom) / 2          spin = (V_top - V_bottom) / ball diameter
+rim speed of wheel i  =  ball speed  +  ball radius x spin x sin(wheel angle - spin axis angle)
 ```
 
-What actually comes out depends on the contact. The default contact law is
-explicit: the normal force is a spring-damper on the tire–ball overlap (the
-squash), and friction is solved every step as Coulomb friction across both
-contacts at once. It finds the impulses that would make both contacts stick,
-then projects them back onto the cone |F_t| ≤ μF_n when that asks for too much.
-MuJoCo integrates the wheels, motors and ball.
+Three wheels give three equations, which is enough to solve for speed, spin
+rate *and* spin direction. `settings_for()` in
+[`pitching_machine/machine.py`](pitching_machine/machine.py) runs this
+backwards to get wheel speeds. In the curveball above, the three tires are at
+96.7, 78.0 and 59.3 mph, and the spin axis comes out at 30° without tilting
+anything.
+
+That formula assumes the ball doesn't slip, though, and it does. So the
+contact is where most of the actual work went:
+
+- **The squash.** Each tire pushes on the ball like a spring
+  (130,000 N/m) with some damping. So the harder they overlap, the harder
+  they push.
+- **Friction.** Every time step, the code figures out the friction forces
+  that would make every tire grip the ball. If that would take more than
+  μ × (the squash force), the tire slides instead. It's the same "static vs.
+  kinetic friction" idea from physics class, but solved for three contacts
+  at once, since they all push on the same ball.
+- **MuJoCo** handles moving the wheels, motors and ball.
 
 ![Launch anatomy](figures/launch_anatomy.png)
 
-What the launch shows:
+Things I found out from this:
 
-- **Spin only starts once one tire stops slipping.** For the first 6.5 ms
-  both tires slide on the ball. Each pushes with μN, the two Ns are equal, so
-  their torques cancel and the ball gets speed but no spin. When the ball
-  catches up to the slow bottom rim, that contact sticks, and the top tire's
-  friction finally has nothing to cancel it.
-- **The ball leaves slower than the rims turn,** because the rims slow down
-  (about 5%) as they hand over energy, and the squashed contact patch sits
-  inside the tire's radius.
-- **Squash raises spin above the ideal.** The contact point sits about half
-  the squash inside the ball's surface, so the same surface-speed difference
-  acts over a shorter lever.
-- **An IMU in the ball would feel over 1000 g** for a few milliseconds
-  (read straight from MuJoCo's accelerometer sensor).
+- **The ball doesn't start spinning right away.** For the first ~5 ms all
+  three tires are sliding on the ball. Each one pushes with μ × N, and since
+  the N's are about the same, the twisting forces cancel out. The ball speeds
+  up but doesn't spin. Then the slowest tire (lower 1B side) catches up to
+  the ball and grips it, and suddenly the other tires' friction isn't
+  cancelled anymore. That's when the spin shows up, all in about 1 ms.
+- **The ball comes out slower than the tires are spinning,** because the
+  wheels slow down about 3.5% as they hand energy to the ball, and because
+  the squashed contact point sits a little inside the tire.
+- **The ball gets a little more spin than the formula says** (105%). The
+  contact point is inside the ball's surface when it's squashed, so the same
+  speed difference acts on a shorter lever.
+- **A sensor inside the ball would feel about 1,750 g** while the tires grab
+  it (this reads straight from MuJoCo's accelerometer).
+- **Spinning pitches don't come out straight.** Topspin pitches leave 3–5°
+  low and the backspin fastball leaves about 2° high. With topspin, the fast
+  top tire is still sliding during the whole entry, and on that side its
+  surface is moving forward *and down*. The two lower tires grab early and
+  stop pushing, so nothing cancels that push. The aiming code fixes it,
+  which is why the curveball above is aimed 6° up. A real operator would
+  have to re-aim for each pitch type too.
 
 ![Contact sweep](figures/contact_sweep.png)
 
-- **Too little squash and the ball leaves with no spin at all.** Both tires
-  slip the whole way through.
-- **Too much squash with slick tires and the ball is spat back out.** It's
-  the rolling-mill nip condition: the tires only grab the ball if
-  μ > tan(nip angle).
-- **The knuckle-curve.** A knuckle curve is a curveball with a better grip.
-  On the machine, the grip is the tire–leather friction, so the
-  `knuckle-curve` preset is the curveball's wheel settings with μ = 1.0
-  instead of 0.7. With the default half inch of squash, extra grip buys
-  almost nothing: the curveball already stops slipping. On a machine with
-  less squash (8 mm) the same extra grip adds about 760 rpm. Grip helps only
-  while the ball is slipping.
-- **The machine has a ceiling.** With μ = 0.7 and the default tires it can't
-  throw 90 mph with 2200 rpm of backspin; more rpm only buys more slip.
-  `calibrate()` uses a damped Newton search to find the closest pitch the
-  machine can actually throw, and the CLI tells you when the target is out of
-  reach.
+- **Too little squash means no spin at all.** The tires slip the whole way.
+- **Too much squash with slippery tires and the ball gets spit back out.**
+  This turns out to be the same rule as a rolling mill: the rollers only pull
+  the metal in if μ > tan(nip angle). With μ = 0.4 it happens at 16 mm of
+  squeeze.
+- **The knuckle curve.** A knuckle curve is basically a curveball with a
+  better grip (the pitcher digs a fingertip into the ball). On the machine,
+  "grip" is the friction between tire and leather, so the `knuckle-curve`
+  preset is the curveball with μ = 1.0 instead of 0.7. With the normal half
+  inch of squeeze, the extra grip does almost nothing because the curveball
+  already stops slipping. With only 6 mm of squeeze, the same extra grip adds
+  about 1,100 rpm. So grip only helps while the ball is still slipping.
 
-## 2. The air
+## The air
 
-[`pitching_machine/aero.py`](pitching_machine/aero.py) has three quasi-steady forces:
+The aerodynamics are in [`pitching_machine/aero.py`](pitching_machine/aero.py).
+There are three forces:
 
-- **Drag** with a drag crisis: the fit to Adair's baseball data from Giordano
-  & Nakanishi, C_D falling from about 0.55 to 0.22 around 35 m/s (78 mph).
-- **Magnus lift,** C_L = 1/(2.32 + 0.4/S) with S = rω/v, the fit used in Alan
-  Nathan's trajectory calculator.
-- **A seam force.** Every bit of seam (the curve in
-  [`pitching_machine/seams.py`](pitching_machine/seams.py)) gets a kernel K(α) depending on its
-  angle from the front of the ball, and pushes the ball sideways toward or
-  away from itself. K was fit so that a non-spinning ball turned about a
-  vertical axis reproduces Watts & Sawyer's wind-tunnel knuckleball
-  measurements (in Giordano & Nakanishi's fit to them) to within 0.05%. The
-  sideways force alone doesn't pin K down, so a small ridge penalty picks
-  the smallest kernel that fits.
+- **Drag.** Drag on a baseball isn't constant. Around 75–80 mph the air near
+  the surface turns turbulent, stays attached longer, and the drag drops by
+  more than half (this is called the drag crisis). I used the fit to Adair's
+  data from Giordano & Nakanishi's textbook.
+- **Magnus force** (why spin makes the ball curve), with the lift formula
+  from Alan Nathan's trajectory calculator.
+- **A seam force.** This was the hardest part, and it's what makes a
+  knuckleball move. I drew the seam as a curve on the ball
+  ([`seams.py`](pitching_machine/seams.py)). Every little piece of seam that's
+  near the spot where the air leaves the ball pushes the ball a bit. I tuned
+  how strong that push is so that a ball turned slowly in a wind tunnel gives
+  the same sideways force Watts & Sawyer measured in 1975 (I used the formula
+  Giordano & Nakanishi fit to their data). It matches that curve to 0.04%.
 
-Seams near the separation line also trip the boundary layer, so they move the
-drag crisis. A ball that isn't spinning keeps one seam picture for the whole
-flight, so its drag depends on how it happened to leave the machine: at
-knuckleball speed, C_D runs from about 0.38 to 0.51 depending on orientation.
+Seams in that zone also trip the airflow, which moves the drag crisis. A
+knuckleball barely spins, so it keeps the same seam position for the whole
+flight. That means its drag depends on how it happened to come out of the
+machine. At 67 mph I got anywhere from C_D = 0.38 to 0.51. **There's no single
+drag number for a knuckleball.**
 
 ![Seam model](figures/seam_model.png)
 
-## 3. Identical setups, different paths
+## Same settings, different pitches
 
-Same machine, same wheel speeds, same aim. The only thing that changes between
-pitches is how the ball sat in the chute, which no real machine controls.
+Everything about the machine stays the same, and I aim at the middle of the
+zone every time. The only thing that changes from pitch to pitch is how the
+ball was sitting in the chute, which a real machine can't control.
 
 ![Plate scatter](figures/plate_scatter.png)
 
-The spinning pitches land within about 0.2 in of each other. The knuckleball
-sprays about 11 in sideways and 10 in vertically (one standard deviation).
+The fastball, curveball and knuckle curve all land within about 0.2 inches of
+each other. The knuckleball is all over the place: about 11 inches side to
+side and 10 inches up and down (one standard deviation).
 
-It isn't numerical noise. The same pitch thrown twice is bit-for-bit
-identical (`plate_scatter.py` checks it, and so does
-`tests/test_machine.py`). Plate location is a smooth, repeatable function of
-the ball's orientation in the chute. For a knuckleball it is just a steep
-one: up to a quarter inch at the plate per degree of rotation in the chute.
+At first I thought this might be the simulation being random or buggy, so I
+checked. The same exact pitch thrown twice gives bit-for-bit the same answer.
+Turning the ball in the chute moves the knuckleball in a smooth, repeatable
+way. It's just really sensitive: up to a quarter inch at the plate for every
+degree the ball is turned.
 
 ![Chute sensitivity](figures/chute_sensitivity.png)
 
-### Does the solver matter?
+### Does the physics engine matter?
 
-The same three pitches, dialed in with textbook settings, through four
-contact models and two timesteps ([`figures/engine_comparison.md`](figures/engine_comparison.md)):
+I started this project in PyBullet and switched to MuJoCo later, so I built
+the same machine in both and ran the same three pitches through each one
+(the full table is in [`figures/engine_comparison.md`](figures/engine_comparison.md)):
 
 | engine | fastball (90 mph, -2200 rpm dialed) | curveball (78 mph, +2500 rpm dialed) | knuckleball (67 mph, +0 rpm dialed) | repeatable |
 |---|---|---|---|---|
 | rigid, no slip (the textbook formula) | 90.0 mph, -2200 rpm | 78.0 mph, +2500 rpm | 67.0 mph, +0 rpm | n/a |
-| MuJoCo + Coulomb contact law, dt 10 us (this repo's default) | 87.6 mph, -2329 rpm | 76.3 mph, +2614 rpm | 66.0 mph, -1 rpm | yes |
-| MuJoCo + Coulomb contact law, dt 50 us | 87.4 mph, -2334 rpm | 76.2 mph, +2619 rpm | 65.9 mph, -0 rpm | yes |
-| MuJoCo's own soft contact, dt 10 us | 72.1 mph, -2100 rpm | 64.6 mph, +2471 rpm | 57.3 mph, -5 rpm | yes |
-| PyBullet compliant contact, dt 10 us | 85.4 mph, -2169 rpm | 73.8 mph, +2443 rpm | 63.3 mph, -1 rpm | yes |
-| PyBullet compliant contact, dt 100 us | 85.7 mph, -2042 rpm | 74.0 mph, +2147 rpm | 63.0 mph, +104 rpm | yes |
+| MuJoCo + Coulomb contact law, dt 10 us (this repo's default) | 88.8 mph, -2327 rpm | 77.5 mph, +2635 rpm | 66.9 mph, -0 rpm | yes |
+| MuJoCo + Coulomb contact law, dt 50 us | 88.6 mph, -2332 rpm | 77.4 mph, +2641 rpm | 66.8 mph, -0 rpm | yes |
+| MuJoCo's own soft contact, dt 10 us | 73.8 mph, -2008 rpm | 66.1 mph, +2385 rpm | 58.4 mph, -2 rpm | yes |
+| PyBullet compliant contact, dt 10 us | 87.7 mph, -2179 rpm | 76.3 mph, +2468 rpm | 64.7 mph, +5 rpm | yes |
+| PyBullet compliant contact, dt 100 us | 85.9 mph, -2494 rpm | 75.9 mph, +2431 rpm | 64.2 mph, -11 rpm | yes |
 
-Every engine is deterministic, so the solvers are honest. They disagree
-because they model the contact differently:
+Every engine gives the same answer every time, so none of them are random.
+They disagree because they handle the contact differently. Some things I ran
+into:
 
-- **MuJoCo's own soft contact is a great robotics contact but a poor
-  squash-and-slip model.** Its friction relaxes on the same time scale as
-  its normal damping, so the ball creeps for milliseconds even below the
-  friction limit. When the ball is accelerated hard, the solver also trades
-  normal force against friction, so the normal force stops being a spring.
-  The model keeps it as `contact_model="mujoco"` for comparison.
-- **The PyBullet port lands within 2–4% of the explicit Coulomb law on speed
-  and about 7% on spin** once its silent defaults are dealt with. PyBullet caps every joint and
-  body at 100 rad/s, which held the wheels to a 28 mph rim and the ball to
-  955 rpm until `maxJointVelocity` was raised. Its friction coefficients also
-  multiply between bodies, and its contact springs combine in series.
-- **At 100 µs, PyBullet gives the "knuckleball" 104 rpm** of spin that isn't
-  there. That's a timestep artifact.
+- **MuJoCo's built-in contact isn't good for this.** It lets friction "creep"
+  for a few milliseconds even when the tire should be gripping. When the ball
+  is being accelerated hard, the normal force also stops acting like a
+  spring. That's why I wrote my own contact law. The built-in version is
+  still there as `contact_model="mujoco"` if you want to compare.
+- **PyBullet secretly caps everything at 100 rad/s.** That held the wheels to
+  a 28 mph rim speed and the ball to 955 rpm. Every pitch came out at 27 mph
+  until I figured that out and raised `maxJointVelocity`. PyBullet also
+  multiplies the two objects' friction values together, and puts their
+  springs in series, so I had to adjust for both. After that, it lands within
+  about 1–3% of my contact law on speed.
+- **Even getting MuJoCo's contact to be a spring of "k N/m" took
+  measuring.** The ball squeezed between the tires felt exactly twice the
+  force I expected, so there's a factor of 2 in the code and a test that
+  checks it.
+- **The flight part is converged.** It uses RK4 with 1 ms steps, and making
+  the steps 10x smaller changes where the ball crosses the plate by less than
+  0.01 inches.
 
-Getting MuJoCo's contact to mean "a spring of k N/m" also took a measurement.
-With impedance 0.5, a ball pinched between two fixed axles feels 2m(kr + bv)
-at each contact, not m(kr + bv). `tests/test_machine.py` checks that the static
-pinch stiffness in both MuJoCo modes and in PyBullet comes out at the
-configured value.
+## Using the ball as the sensor
 
-The flight integrator (RK4, with exact rotation of the seams) is converged to
-better than 0.01 in at the plate with 1 ms steps, even for a 2500 rpm
-curveball whose seam force changes with every turn.
+Noel Perkins's lab at the University of Michigan built a baseball with a
+wireless motion sensor (an IMU) inside it (McGinnis & Perkins, *Sensors*,
+2012). That got me thinking about this. An accelerometer at the center of a
+flying ball can't feel gravity, because everything is falling together. So
+it only feels the air pushing on the ball. If you use the gyroscope to keep
+track of which way the ball is facing, the ball can basically tell you the
+drag, lift and seam forces on it at every moment, without needing any model
+of the air.
 
-## 4. The ball as the instrument
-
-Noel Perkins's lab at the University of Michigan put a wireless inertial
-measurement unit inside a baseball (McGinnis & Perkins, *Sensors*, 2012). An
-accelerometer at the center of a ball in flight can't feel gravity, so it
-reads the aerodynamic force alone, in the ball's own frame. Rotate that by
-the gyro's orientation estimate and the ball reports drag, lift and seam
-forces at every instant, without a model of the air.
-
-[`experiments/instrumented_ball.py`](experiments/instrumented_ball.py) does
-this to a simulated knuckleball. The full model stands in for reality; the
-IMU has noise, bias and a 1 kHz sample rate. Then it compares the measurement
-with a simple model (constant C_D = 0.35, no seams):
+[`experiments/instrumented_ball.py`](experiments/instrumented_ball.py) tries
+this on a simulated knuckleball. I treat my full model as "reality" and put a
+fake IMU inside the ball, with noise and bias, sampling at 1,000 times a
+second. Then I compare what it measures against a simple model that uses
+constant drag (C_D = 0.35) and no seams.
 
 ![Instrumented ball](figures/instrumented_ball.png)
 
-- **The simple model misses the plate by 13 in.** Dead-reckoning from the
-  IMU alone gets within 0.6 in.
-- **The ball reports its own drag coefficient,** climbing from about 0.40 to 0.46
-  as it slows into the drag crisis. The simple model's 0.35 is wrong the
-  whole way.
-- **Measured minus predicted is the seam force,** recovered from the
-  measurement with no knowledge of seams. The simulation predicts, the ball
-  answers, and the difference is the physics the simple model is missing.
+- **The simple model misses the real plate location by about 13.5 inches.**
+  Tracking the ball using only its own IMU readings gets within 0.7 inches.
+- **The ball measures its own drag coefficient,** going from about 0.39 to
+  0.47 as it slows down into the drag crisis. The simple model's 0.35 is
+  wrong the entire time.
+- **What the ball measures, minus what the simple model predicts, is the
+  seam force.** It comes out of the data even though nothing in the
+  measurement knows about seams. So the simulation makes a prediction, the
+  ball measures what really happened, and the difference between them is the
+  physics the simple model is missing.
 
-## Layout
+## What's in the code
 
 ```
 pitching_machine/
-  machine.py           MuJoCo machine: MJCF builder, explicit Coulomb contact, launch, calibrate
-  aero.py              drag crisis, Magnus lift, seam force (vectorized over many balls)
-  seams.py             seam curve on the sphere
-  flight.py            batched RK4 flight to the plate, Statcast-style break
-  imu.py               virtual instrumented ball: record, reconstruct, residual vs. a model
-  pitch.py             presets, aiming, CLI
-  view.py              interactive MuJoCo viewer
+  machine.py           the MuJoCo machine: builds the model, my contact law, launching, calibrating
+  aero.py              drag, Magnus force, seam force (does lots of balls at once)
+  seams.py             the seam curve
+  flight.py            flies the ball to the plate, measures break like Statcast does
+  imu.py               the fake sensor inside the ball
+  pitch.py             presets, aiming, and the command line tool
+  view.py              the 3D viewer
   pybullet_machine.py  the same machine in PyBullet
-experiments/           one script per figure (see the loop above)
-tests/                 31 tests: contact calibration, symmetry, determinism, convergence, IMU
+experiments/           one script for each graph
+tests/                 37 tests (contact springs, symmetry, same-answer-twice, step size, the IMU, ...)
 ```
 
-## Assumptions and limits
+## What's not realistic (yet)
 
-- **The machine is plausible, not measured.** Tire stiffness (1.3e5 N/m),
-  damping, squeeze (half an inch per tire), μ = 0.7, wheel inertia and motor
-  torque were chosen to look like a hobby two-wheel machine, not taken from
-  a spec sheet. The sweeps show how much each one matters.
-- **The tire is a point-contact spring.** A real pneumatic tire wraps
-  around the ball, and its contact patch has its own slip distribution.
-- **The seam force is quasi-steady,** with no wake lag, and its calibration
-  is from one rotation axis of a non-spinning ball. Everything off that axis
-  is the model's prediction.
-- **Seam effects on spinning pitches are an open question** (the
-  "seam-shifted wake"). The seam force tapers with spin parameter as
-  1/(1 + S/0.05), a placeholder that keeps seam orientation to inches, not
-  feet, for fastballs and curveballs. Knuckleballs (S ≈ 0.002) are
-  unaffected.
-- **No spin decay in flight. The ball's inertia is that of a uniform
-  sphere,** a few percent high for a cork-centered ball.
-- **The PyBullet port only builds an untilted, level head.**
+- **I made up the machine's numbers.** The tire stiffness, damping, half
+  inch of squeeze, μ = 0.7, wheel weight and motor strength are guesses at
+  what a normal three-wheel machine might be like, not measurements from a
+  real one. The sweeps above show how much each one matters.
+- **The tire is treated like a single spring touching the ball at one
+  point.** A real air-filled tire wraps around the ball.
+- **The seam force reacts instantly.** In real air the wake takes a little
+  time to change. Also, it was tuned using a ball turned around only one
+  axis, so everything else is the model's guess.
+- **Nobody fully knows how much seams matter on a ball that's spinning
+  fast** (people call it the "seam-shifted wake"). I just turn the seam force
+  down as spin goes up, so seams move fastballs and curveballs by inches, not
+  feet. That's a placeholder. Knuckleballs barely spin, so they aren't
+  affected.
+- **The spin doesn't slow down in flight, and the ball is treated as solid
+  all the way through.** A real ball has a cork center.
+- **The PyBullet version only works with the machine level and not
+  tilted.**
 
-## References
+## Sources
 
 - R. G. Watts and E. Sawyer, "Aerodynamics of a knuckleball," *American Journal of Physics* 43, 960 (1975).
 - N. J. Giordano and H. Nakanishi, *Computational Physics*, 2nd ed. (2006), sections 2.2 and 2.3.
@@ -292,9 +310,5 @@ tests/                 31 tests: contact calibration, symmetry, determinism, con
 - R. S. McGinnis and N. C. Perkins, "A highly miniaturized, wireless inertial measurement unit for characterizing the dynamics of pitched baseballs and softballs," *Sensors* 12, 11933 (2012).
 - E. Todorov, T. Erez and Y. Tassa, "MuJoCo: A physics engine for model-based control," IROS 2012.
 
-An earlier PyBullet version of the machine lives in
+My first version of this, in PyBullet, is in
 [henrywei57/pitching-machine-sim](https://github.com/henrywei57/pitching-machine-sim).
-
-## License
-
-MIT

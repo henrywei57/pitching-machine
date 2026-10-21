@@ -13,7 +13,8 @@ from _style import FIGURES, ROOT
 from pitching_machine.constants import MPH, RPM
 from pitching_machine.machine import launch, settings_for
 
-PITCHES = {"fastball": (90, -2200), "curveball": (78, 2500), "knuckleball": (67, 0)}
+# speed (mph), spin (rpm), spin axis (deg)
+PITCHES = {"fastball": (90, -2200, 0), "curveball": (78, 2500, 30), "knuckleball": (67, 0, 0)}
 
 
 def mujoco(contact_model, dt):
@@ -50,8 +51,8 @@ def main():
     rows = []
     for name, run in ENGINES:
         cells, repeatable = [], True
-        for pitch, (v, s) in PITCHES.items():
-            cfg = settings_for(v, s)
+        for pitch, (v, s, axis) in PITCHES.items():
+            cfg = settings_for(v, s, axis)
             ok, speed, spin, raw = run(cfg)
             if raw is not None:
                 again = run(cfg)[3]
@@ -60,7 +61,7 @@ def main():
         rows.append((name, cells, "n/a" if raw is None else ("yes" if repeatable else "**no**")))
         print(name, cells, rows[-1][2])
 
-    head = "| engine | " + " | ".join(f"{p} ({v} mph, {s:+d} rpm dialed)" for p, (v, s) in PITCHES.items()) + " | repeatable |"
+    head = "| engine | " + " | ".join(f"{p} ({v} mph, {s:+d} rpm dialed)" for p, (v, s, _) in PITCHES.items()) + " | repeatable |"
     lines = [head, "|" + "---|" * (len(PITCHES) + 2)]
     lines += [f"| {n} | " + " | ".join(c) + f" | {r} |" for n, c, r in rows]
     out = FIGURES / "engine_comparison.md"

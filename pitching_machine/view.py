@@ -15,7 +15,7 @@ import numpy as np
 
 from .aero import Aero
 from .flight import fly
-from .machine import WHEELS, Machine, mat_to_quat
+from .machine import Machine, mat_to_quat
 from .pitch import PRESETS, preset_config, throw
 
 FRAME = 1.0 / 60.0  # s of wall clock per frame
@@ -37,7 +37,7 @@ def replay(machine: Machine, slowmo=250.0, flight_speed=0.5):
     f = fly(pos, vel, omega, m.data.xmat[m.ball_body].reshape(1, 3, 3), Aero())
     t_end = np.nanmax(f.plate_time) if np.isfinite(f.plate_time).any() else f.t[-1]
     t0 = m.data.time
-    wheel_q = {w: m.data.qpos[m.qadr[w]] for w in WHEELS}
+    wheel_q = [m.data.qpos[m.qadr[i]] for i in m.wheels]
     wheel_w = m.wheel_targets
     a = m.ball_qadr
     for t in np.arange(0.0, t_end + 0.1, FRAME * flight_speed):
@@ -45,8 +45,8 @@ def replay(machine: Machine, slowmo=250.0, flight_speed=0.5):
         m.data.qpos[a : a + 3] = f.pos[k, 0]
         m.data.qpos[a + 3 : a + 7] = mat_to_quat(f.R[k, 0])
         m.data.qvel[:] = 0.0
-        for w in WHEELS:
-            m.data.qpos[m.qadr[w]] = wheel_q[w] + wheel_w[w] * t
+        for i in m.wheels:
+            m.data.qpos[m.qadr[i]] = wheel_q[i] + wheel_w[i] * t
         m.data.time = t0 + t
         mujoco.mj_forward(m.model, m.data)
         yield

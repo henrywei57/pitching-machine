@@ -1,7 +1,7 @@
 """Machine + air: throw a pitch from wheel settings and see where it crosses the plate.
 
     python -m pitching_machine.pitch curveball
-    python -m pitching_machine.pitch --speed 85 --spin -2000 --tilt 15 --calibrate --plot pitch.png
+    python -m pitching_machine.pitch --speed 85 --spin -2000 --axis 15 --calibrate --plot pitch.png
 """
 
 import argparse
@@ -12,18 +12,18 @@ import numpy as np
 from .aero import Aero
 from .constants import FOOT, INCH, MPH, PLATE_DISTANCE, RPM
 from .flight import Flight, fly, movement
-from .machine import LaunchResult, MachineConfig, _ry, _rz, calibrate, launch, quat_to_mat, settings_for
+from .machine import THREE_WHEEL, TWO_WHEEL, LaunchResult, MachineConfig, _ry, _rz, calibrate, launch, quat_to_mat, settings_for
 
-# Target speed (mph), spin (rpm, + topspin / - backspin) and head tilt (deg).
-# A positive tilt turns the spin axis so the ball also breaks toward first base,
-# the glove side of a right-handed pitcher.
+# Target speed (mph), spin (rpm, + topspin / - backspin) and spin axis (deg).
+# A positive axis turns the spin so the ball also breaks toward first base,
+# the glove side of a right-handed pitcher. Three wheels do that with speeds.
 PRESETS = {
-    "fastball": dict(speed_mph=90, spin_rpm=-2200, tilt_deg=0),
-    "curveball": dict(speed_mph=78, spin_rpm=2500, tilt_deg=30),
+    "fastball": dict(speed_mph=90, spin_rpm=-2200, axis_deg=0),
+    "curveball": dict(speed_mph=78, spin_rpm=2500, axis_deg=30),
     # Same dial settings as the curveball. The "knuckle" is a better grip, and on
     # a machine the grip is the friction between tire and leather.
-    "knuckle-curve": dict(speed_mph=78, spin_rpm=2500, tilt_deg=30, friction=1.0),
-    "knuckleball": dict(speed_mph=67, spin_rpm=0, tilt_deg=0),
+    "knuckle-curve": dict(speed_mph=78, spin_rpm=2500, axis_deg=30, friction=1.0),
+    "knuckleball": dict(speed_mph=67, spin_rpm=0, axis_deg=0),
 }
 
 ZONE_MIDDLE = 2.5 * FOOT  # aim point above the plate
@@ -55,7 +55,8 @@ class Pitch:
     def summary(self):
         lines = [self.launch.summary()]
         c = self.launch.config
-        lines.append(f"aim          {c.elevation_deg:+.2f} deg up   {c.azimuth_deg:+.2f} deg toward 1B")
+        tilt = f"   head tilted {c.tilt_deg:+.0f} deg" if c.tilt_deg else ""
+        lines.append(f"aim          {c.elevation_deg:+.2f} deg up   {c.azimuth_deg:+.2f} deg toward 1B{tilt}")
         if np.isnan(self.flight_time):
             lines.append("ball hit the ground before the plate")
         else:
@@ -123,10 +124,10 @@ def throw(cfg: MachineConfig, aero: Aero = None, aim_at=ZONE_MIDDLE) -> Pitch:
 def preset_config(name, calibrated=False, **overrides):
     p = dict(PRESETS[name])
     p.update(overrides)
-    speed, spin = p.pop("speed_mph"), p.pop("spin_rpm")
+    speed, spin, axis = p.pop("speed_mph"), p.pop("spin_rpm"), p.pop("axis_deg")
     if calibrated:
-        return calibrate(speed, spin, **p).config
-    return settings_for(speed, spin, **p)
+        return calibrate(speed, spin, axis, **p).config
+    return settings_for(speed, spin, axis, **p)
 
 
 def plot_pitch(pitch: Pitch, path):
@@ -148,11 +149,12 @@ def plot_pitch(pitch: Pitch, path):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Throw a pitch with the two-wheel machine.")
+    ap = argparse.ArgumentParser(description="Throw a pitch with the pitching machine.")
     ap.add_argument("preset", nargs="?", choices=sorted(PRESETS), help="named pitch")
     ap.add_argument("--speed", type=float, help="target speed, mph")
     ap.add_argument("--spin", type=float, help="target spin, rpm (+ topspin, - backspin)")
-    ap.add_argument("--tilt", type=float, default=0.0, help="head tilt, deg (+ breaks toward 1B)")
+    ap.add_argument("--axis", type=float, default=0.0, help="spin axis, deg (+ also breaks toward 1B)")
+    ap.add_argument("--wheels", type=int, choices=(2, 3), default=3, help="three-wheel (default) or two-wheel machine")
     ap.add_argument("--friction", type=float, help="tire-leather friction coefficient")
     ap.add_argument("--calibrate", action="store_true", help="adjust wheel rpm until the radar gun agrees")
     ap.add_argument("--seed", type=int, help="random seam orientation in the chute (default: fixed)")
@@ -160,11 +162,11 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     over = {} if a.friction is None else {"friction": a.friction}
+    over["wheel_angles_deg"] = THREE_WHEEL if a.wheels == 3 else TWO_WHEEL
     if a.preset:
         cfg = preset_config(a.preset, calibrated=a.calibrate, **over)
     elif a.speed is not None and a.spin is not None:
-        args = dict(tilt_deg=a.tilt, **over)
-        cfg = calibrate(a.speed, a.spin, **args).config if a.calibrate else settings_for(a.speed, a.spin, **args)
+        cfg = calibrate(a.speed, a.spin, a.axis, **over).config if a.calibrate else settings_for(a.speed, a.spin, a.axis, **over)
     else:
         ap.error("give a preset, or both --speed and --spin")
     if a.seed is not None:
