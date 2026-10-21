@@ -1,0 +1,9 @@
+mujoco>=3.1
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+imageio>=2.30
+pillow>=10
+pytest>=7
+# optional, for experiments/compare_engines.py
+# pybullet>=3.2
