@@ -45,22 +45,38 @@ break        +12.8 in horizontal (+ toward 1B)   -23.6 in vertical (vs. gravity 
 ```
 
 The presets are `fastball`, `curveball`, `knuckle-curve` and `knuckleball`.
-You can also make up your own pitch:
+
+You can also set each of the three wheels yourself, like you're the one
+running the machine. The order is top, lower 3B side, lower 1B side:
+
+```bash
+python -m pitching_machine.pitch --rpm 3200 2600 2000
+```
+
+The output tells you what the no-slip math expects from those speeds (the
+"ideal exit" line) and then what actually comes out. Make the top wheel the
+fastest for topspin, make the lower wheels faster for backspin, set all three
+the same for a knuckleball, and make the two lower wheels different to tilt
+the spin so the ball breaks sideways.
+
+Or give it the pitch you want and let it figure out the wheel speeds:
 
 ```bash
 python -m pitching_machine.pitch --speed 85 --spin -2000 --axis 15 --plot pitch.png
 python -m pitching_machine.pitch fastball --calibrate   # keeps adjusting the wheels until the "radar gun" says 90
 python -m pitching_machine.pitch knuckleball --seed 3   # puts the ball in the chute a different way
 python -m pitching_machine.pitch curveball --wheels 2   # the old two-wheel machine, for comparison
+python -m pitching_machine.pitch --wheels 2 --rpm 3300 1900   # two wheels by hand: top, bottom
 ```
 
 To watch it in MuJoCo's 3D viewer:
 
 ```bash
 mjpython -m pitching_machine.view knuckleball   # on a Mac. Use plain python on Windows/Linux
+mjpython -m pitching_machine.view --rpm 3200 2600 2000   # watch your own wheel settings
 ```
 
-To run the tests (37 of them, about 30 seconds) and remake every graph and GIF here:
+To run the tests (39 of them, about 30 seconds) and remake every graph and GIF here:
 
 ```bash
 pytest
@@ -277,7 +293,7 @@ pitching_machine/
   view.py              the 3D viewer
   pybullet_machine.py  the same machine in PyBullet
 experiments/           one script for each graph
-tests/                 37 tests (contact springs, symmetry, same-answer-twice, step size, the IMU, ...)
+tests/                 39 tests (contact springs, symmetry, same-answer-twice, step size, the IMU, ...)
 ```
 
 ## What's not realistic (yet)

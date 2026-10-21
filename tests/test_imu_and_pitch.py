@@ -6,7 +6,7 @@ from pitching_machine.constants import INCH, MPH
 from pitching_machine.flight import fly
 from pitching_machine.imu import IMUSpec, model_residual, reconstruct, record
 from pitching_machine.machine import Machine
-from pitching_machine.pitch import ZONE_MIDDLE, preset_config, throw
+from pitching_machine.pitch import ZONE_MIDDLE, main, preset_config, throw
 from pitching_machine.view import replay
 
 PERFECT = IMUSpec(gyro_noise=0, gyro_bias=0, accel_noise=0, accel_bias=0)
@@ -47,3 +47,16 @@ def test_viewer_replay_runs_headless():
     frames = sum(1 for _ in replay(m))
     assert frames > 50
     assert m.ball_state()[0][0] > 15  # ended near the plate
+
+
+def test_cli_sets_each_wheel_by_hand(capsys):
+    main(["--rpm", "3200", "2600", "2000"])
+    out = capsys.readouterr().out
+    assert "top 3200   lower 3B 2600   lower 1B 2000 rpm" in out
+    assert "axis +30 deg" in out  # top fastest, lower 1B slowest: a curveball breaking toward 1B
+
+
+def test_cli_wants_one_rpm_per_wheel(capsys):
+    with pytest.raises(SystemExit):
+        main(["--rpm", "3000", "2000"])
+    assert "top, lower 3B, lower 1B" in capsys.readouterr().err

@@ -2,6 +2,7 @@
 
     python -m pitching_machine.pitch curveball
     python -m pitching_machine.pitch --speed 85 --spin -2000 --axis 15 --calibrate --plot pitch.png
+    python -m pitching_machine.pitch --rpm 3200 2600 2000      # each wheel by hand: top, lower 3B, lower 1B
 """
 
 import argparse
@@ -12,7 +13,8 @@ import numpy as np
 from .aero import Aero
 from .constants import FOOT, INCH, MPH, PLATE_DISTANCE, RPM
 from .flight import Flight, fly, movement
-from .machine import THREE_WHEEL, TWO_WHEEL, LaunchResult, MachineConfig, _ry, _rz, calibrate, launch, quat_to_mat, settings_for
+from .machine import (THREE_WHEEL, TWO_WHEEL, LaunchResult, MachineConfig, _ry, _rz, calibrate, launch, quat_to_mat,
+                      settings_for, wheel_label)
 
 # Target speed (mph), spin (rpm, + topspin / - backspin) and spin axis (deg).
 # A positive axis turns the spin so the ball also breaks toward first base,
@@ -121,6 +123,15 @@ def throw(cfg: MachineConfig, aero: Aero = None, aim_at=ZONE_MIDDLE) -> Pitch:
     return Pitch(res, f, float(h[0]), float(v[0]))
 
 
+def rpm_config(rpms, wheel_angles_deg=THREE_WHEEL, **kw):
+    """A machine with each wheel's rpm set by hand, in the order of wheel_angles_deg
+    (three wheels: top, lower 3B, lower 1B; two wheels: top, bottom)."""
+    if len(rpms) != len(wheel_angles_deg):
+        names = ", ".join(wheel_label(t) for t in wheel_angles_deg)
+        raise ValueError(f"give {len(wheel_angles_deg)} rpms, one per wheel, in this order: {names}")
+    return MachineConfig(wheel_rpm=tuple(float(r) for r in rpms), wheel_angles_deg=tuple(wheel_angles_deg), **kw)
+
+
 def preset_config(name, calibrated=False, **overrides):
     p = dict(PRESETS[name])
     p.update(overrides)
@@ -154,6 +165,8 @@ def main(argv=None):
     ap.add_argument("--speed", type=float, help="target speed, mph")
     ap.add_argument("--spin", type=float, help="target spin, rpm (+ topspin, - backspin)")
     ap.add_argument("--axis", type=float, default=0.0, help="spin axis, deg (+ also breaks toward 1B)")
+    ap.add_argument("--rpm", type=float, nargs="+", metavar="RPM",
+                    help="set each wheel yourself, in order: top, lower 3B, lower 1B (with --wheels 2: top, bottom)")
     ap.add_argument("--wheels", type=int, choices=(2, 3), default=3, help="three-wheel (default) or two-wheel machine")
     ap.add_argument("--friction", type=float, help="tire-leather friction coefficient")
     ap.add_argument("--calibrate", action="store_true", help="adjust wheel rpm until the radar gun agrees")
@@ -163,23 +176,34 @@ def main(argv=None):
 
     over = {} if a.friction is None else {"friction": a.friction}
     over["wheel_angles_deg"] = THREE_WHEEL if a.wheels == 3 else TWO_WHEEL
-    if a.preset:
+    if a.rpm is not None:
+        if a.preset or a.speed is not None or a.spin is not None or a.calibrate:
+            ap.error("--rpm sets the wheels directly; leave out the preset, --speed/--spin and --calibrate")
+        try:
+            cfg = rpm_config(a.rpm, **over)
+        except ValueError as e:
+            ap.error(str(e))
+    elif a.preset:
         cfg = preset_config(a.preset, calibrated=a.calibrate, **over)
     elif a.speed is not None and a.spin is not None:
         cfg = calibrate(a.speed, a.spin, a.axis, **over).config if a.calibrate else settings_for(a.speed, a.spin, a.axis, **over)
     else:
-        ap.error("give a preset, or both --speed and --spin")
+        ap.error("give a preset, both --speed and --spin, or --rpm for each wheel")
     if a.seed is not None:
         q = np.random.default_rng(a.seed).normal(size=4)
         cfg = cfg.with_(ball_quat=tuple(q / np.linalg.norm(q)))
 
-    p = throw(cfg)
+    try:
+        p = throw(cfg)
+    except RuntimeError as e:
+        ap.exit(1, f"{e}\n")
     print(p.summary())
-    want = PRESETS[a.preset] if a.preset else dict(speed_mph=a.speed, spin_rpm=a.spin)
-    got_v, got_s = p.launch.speed / MPH, p.launch.signed_spin / RPM
-    if a.calibrate and (abs(got_v - want["speed_mph"]) > 0.5 or abs(got_s - want["spin_rpm"]) > 50):
-        print(f"note: the machine can't reach {want['speed_mph']:.0f} mph / {want['spin_rpm']:+.0f} rpm; "
-              "this is the closest it gets. More squeeze or grip (--friction) raises the ceiling.")
+    if a.calibrate:
+        want = PRESETS[a.preset] if a.preset else dict(speed_mph=a.speed, spin_rpm=a.spin)
+        got_v, got_s = p.launch.speed / MPH, p.launch.signed_spin / RPM
+        if abs(got_v - want["speed_mph"]) > 0.5 or abs(got_s - want["spin_rpm"]) > 50:
+            print(f"note: the machine can't reach {want['speed_mph']:.0f} mph / {want['spin_rpm']:+.0f} rpm; "
+                  "this is the closest it gets. More squeeze or grip (--friction) raises the ceiling.")
     if a.plot:
         plot_pitch(p, a.plot)
         print(f"saved {a.plot}")

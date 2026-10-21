@@ -3,6 +3,7 @@ then the flight to the plate, on a loop.
 
     mjpython -m pitching_machine.view curveball      # macOS (mjpython ships with mujoco)
     python -m pitching_machine.view knuckleball      # Linux / Windows
+    mjpython -m pitching_machine.view --rpm 3200 2600 2000   # top, lower 3B, lower 1B
 
 Drag to orbit, right-drag to pan, scroll to zoom. Close the window to quit.
 """
@@ -15,8 +16,8 @@ import numpy as np
 
 from .aero import Aero
 from .flight import fly
-from .machine import Machine, mat_to_quat
-from .pitch import PRESETS, preset_config, throw
+from .machine import THREE_WHEEL, TWO_WHEEL, Machine, mat_to_quat
+from .pitch import PRESETS, preset_config, rpm_config, throw
 
 FRAME = 1.0 / 60.0  # s of wall clock per frame
 
@@ -54,12 +55,28 @@ def replay(machine: Machine, slowmo=250.0, flight_speed=0.5):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("preset", nargs="?", default="knuckleball", choices=sorted(PRESETS))
+    ap.add_argument("preset", nargs="?", choices=sorted(PRESETS), help="named pitch (default: knuckleball)")
+    ap.add_argument("--rpm", type=float, nargs="+", metavar="RPM",
+                    help="set each wheel yourself, in order: top, lower 3B, lower 1B (with --wheels 2: top, bottom)")
+    ap.add_argument("--wheels", type=int, choices=(2, 3), default=3, help="three-wheel (default) or two-wheel machine")
     a = ap.parse_args(argv)
+    angles = THREE_WHEEL if a.wheels == 3 else TWO_WHEEL
+    if a.rpm is not None:
+        if a.preset:
+            ap.error("give a preset or --rpm, not both")
+        try:
+            cfg = rpm_config(a.rpm, wheel_angles_deg=angles)
+        except ValueError as e:
+            ap.error(str(e))
+    else:
+        cfg = preset_config(a.preset or "knuckleball", wheel_angles_deg=angles)
 
     import mujoco.viewer
 
-    cfg = throw(preset_config(a.preset)).launch.config  # aimed at the zone
+    try:
+        cfg = throw(cfg).launch.config  # aimed at the zone
+    except RuntimeError as e:
+        ap.exit(1, f"{e}\n")
     machine = Machine(cfg, scene=True)
     with mujoco.viewer.launch_passive(machine.model, machine.data) as v:
         v.cam.lookat[:] = [2.0, 0.0, 1.2]
