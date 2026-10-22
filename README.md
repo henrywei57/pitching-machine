@@ -82,11 +82,21 @@ then the flight at half speed with an orange trail behind the ball. The
 numbers in the top-left corner show the wheel speeds, what came out of the
 machine, and where the ball crossed the plate.
 
-**Changing the wheel speeds while it's running:** in the panel on the right,
-open **Control**. There's a slider for each wheel: `top_rpm`, `lower_3B_rpm`
-and `lower_1B_rpm` (0 to 6000 rpm). Drag one and the next pitch uses the new
-speed. The machine re-aims at the middle of the zone first, so the ball still
-comes in for a strike and you can see how the break changes.
+**Changing the wheel speeds while it's running:** click back on the terminal
+you launched it from, type the new speeds and press Enter:
+
+```
+3200 2600 2000    all three wheels, in order: top, lower 3B, lower 1B
+top 3500          just one wheel (3b and 1b work too)
+curveball         a preset: fastball, curveball, knuckle-curve, knuckleball
+```
+
+The pitch switches right away. The machine re-aims at the middle of the zone
+first, so the ball still comes in for a strike and you can see how the break
+changes. Don't type the numbers into the 3D window itself, because MuJoCo uses
+the number keys for other stuff. You can also drag the sliders instead: in the
+panel on the right, open **Control** and there's one for each wheel
+(`top_rpm`, `lower_3B_rpm`, `lower_1B_rpm`, 0 to 6000 rpm).
 
 **Camera views:** press `[` and `]` to switch between them, or `Esc` for a
 free camera (drag to spin around, right-drag to move, scroll to zoom).
@@ -102,7 +112,7 @@ free camera (drag to spin around, right-drag to move, scroll to zoom).
 
 ### Tests and graphs
 
-To run the tests (44 of them, about 40 seconds) and remake every graph and GIF here:
+To run the tests (55 of them, about 30 seconds) and remake every graph and GIF here:
 
 ```bash
 pytest
@@ -316,10 +326,10 @@ pitching_machine/
   flight.py            flies the ball to the plate, measures break like Statcast does
   imu.py               the fake sensor inside the ball
   pitch.py             presets, aiming, and the command line tool
-  view.py              the 3D viewer (camera views, rpm sliders)
+  view.py              the 3D viewer (camera views, typed rpm, sliders)
   pybullet_machine.py  the same machine in PyBullet
 experiments/           one script for each graph
-tests/                 44 tests (contact springs, symmetry, same-answer-twice, step size, the IMU, ...)
+tests/                 55 tests (contact springs, symmetry, same-answer-twice, step size, the IMU, ...)
 ```
 
 ## What's not realistic (yet)

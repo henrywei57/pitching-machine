@@ -7,7 +7,7 @@ from pitching_machine.flight import fly
 from pitching_machine.imu import IMUSpec, model_residual, reconstruct, record
 from pitching_machine.machine import Machine
 from pitching_machine.pitch import ZONE_MIDDLE, main, preset_config, rpm_config, throw
-from pitching_machine.view import CAMERAS, overlay, replay
+from pitching_machine.view import CAMERAS, overlay, parse_command, replay
 
 PERFECT = IMUSpec(gyro_noise=0, gyro_bias=0, accel_noise=0, accel_bias=0)
 
@@ -101,3 +101,24 @@ def test_viewer_overlay_shows_wheels_and_result():
     assert left.splitlines()[:3] == ["top wheel", "lower 3B wheel", "lower 1B wheel"]
     assert right.splitlines()[:3] == ["3200 rpm", "2600 rpm", "2000 rpm"]
     assert "axis +30 deg" in right
+
+
+@pytest.mark.parametrize("typed, want", [
+    ("3500 2600 2000", (3500, 2600, 2000)),
+    ("top 3500", (3500, 2600, 2000)),
+    ("3b 2400", (3200, 2400, 2000)),
+    ("lower 1B 1800", (3200, 2600, 1800)),
+    ("top 3500, 1b 2100", (3500, 2600, 2100)),
+])
+def test_typed_wheel_speeds(typed, want):
+    assert parse_command(typed, rpm_config([3200, 2600, 2000])) == want
+
+
+@pytest.mark.parametrize("typed", ["3000 2000", "top", "hello 5", "top 9000", ""])
+def test_typed_nonsense_gets_a_hint(typed):
+    with pytest.raises(ValueError):
+        parse_command(typed, rpm_config([3200, 2600, 2000]))
+
+
+def test_typing_a_preset_loads_its_wheels():
+    assert parse_command("knuckleball", rpm_config([3200, 2600, 2000])) == preset_config("knuckleball").wheel_rpm

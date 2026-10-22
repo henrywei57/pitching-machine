@@ -5,17 +5,26 @@
     mjpython -m pitching_machine.view --rpm 3200 2600 2000 --camera catcher
 
 In the window:
-  Wheel speeds   In the panel on the right, open "Control" and drag the
-                 top_rpm, lower_3B_rpm and lower_1B_rpm sliders. The next pitch
-                 uses them; the machine re-aims at the middle of the zone first.
+  Wheel speeds   Type them in the terminal and press Enter (see below), or open
+                 "Control" in the panel on the right and drag the top_rpm,
+                 lower_3B_rpm and lower_1B_rpm sliders. The next pitch uses them;
+                 the machine re-aims at the middle of the zone first.
   Cameras        [ and ] step through watcher, catcher, batter, side, machine and
                  follow_ball. Esc gives a free camera: drag to orbit, right-drag
                  to pan, scroll to zoom.
   Quit           close the window.
+
+Typing in the terminal while it runs:
+  3200 2600 2000    all three wheels, in order: top, lower 3B, lower 1B
+  top 3500          just one wheel (3b, 1b, and bottom on a two-wheel machine)
+  curveball         a preset: fastball, curveball, knuckle-curve, knuckleball
 """
 
 import argparse
 import contextlib
+import queue
+import sys
+import threading
 import time
 
 import mujoco
@@ -96,8 +105,55 @@ def overlay(pitch, phase=""):
     return "\n".join(left), "\n".join(right)
 
 
-HELP = ("change wheel speeds: right panel > Control > *_rpm sliders",
+HELP = ("change wheel speeds: type them in the terminal (like 3200 2600 2000), or drag the sliders on the right",
         "[ ]  next camera     Esc  free camera     close window to quit")
+TYPING_HELP = __doc__.split("Typing in the terminal while it runs:")[1].rstrip()
+
+
+def parse_command(text, cfg):
+    """Turn a typed line into new wheel rpms, or raise ValueError saying what to type.
+
+    "3200 2600 2000" sets every wheel in order, "top 3500" sets one wheel
+    ("3b", "1b", "bottom" too, and "lower 3b" works), and a preset name loads
+    that pitch's wheel speeds.
+    """
+    words = text.lower().replace(",", " ").replace("=", " ").split()
+    order = ", ".join(cfg.labels)
+    hint = (f"type {cfg.n_wheels} numbers ({order}), a wheel and a number like 'top 3500', "
+            f"or a preset: {', '.join(PRESETS)}")
+    if not words:
+        raise ValueError(hint)
+
+    def number(w):
+        try:
+            return float(w)
+        except ValueError:
+            return None
+
+    if len(words) == 1 and words[0] in PRESETS:
+        rpm = preset_config(words[0], wheel_angles_deg=cfg.wheel_angles_deg).wheel_rpm
+    elif all(number(w) is not None for w in words):
+        if len(words) != cfg.n_wheels:
+            raise ValueError(f"type {cfg.n_wheels} numbers, one per wheel, in this order: {order}")
+        rpm = [number(w) for w in words]
+    else:
+        rpm = list(cfg.wheel_rpm)
+        names = [lab.lower().split()[-1] for lab in cfg.labels]  # top, 3b, 1b / top, bottom
+        tokens = [w for w in words if w not in ("lower", "wheel", "rpm")]
+        if len(tokens) % 2:
+            raise ValueError(hint)
+        for name, value in zip(tokens[::2], tokens[1::2]):
+            if name not in names or number(value) is None:
+                raise ValueError(hint)
+            rpm[names.index(name)] = number(value)
+    new = cfg.with_(wheel_rpm=tuple(float(r) for r in rpm))
+    new.check_rpm()
+    return new.wheel_rpm
+
+
+def _read_lines(q):
+    for line in sys.stdin:
+        q.put(line.strip())
 
 
 def _trail(scn, f, k, every=8):
@@ -140,8 +196,12 @@ def main(argv=None):
         ap.exit(1, f"{e}\n")
     machine = Machine(pitch.launch.config, scene=True)
     m = machine.model
-    print(__doc__.split("In the window:")[1].rstrip())
+    print(__doc__.split("In the window:")[1].split("Typing in the terminal")[0].rstrip())
     print("\n" + pitch.summary())
+    print("\nType new wheel speeds here and press Enter:" + TYPING_HELP)
+
+    typed = queue.Queue()
+    threading.Thread(target=_read_lines, args=(typed,), daemon=True).start()
 
     with mujoco.viewer.launch_passive(m, machine.data, show_left_ui=False) as v:
         with v.lock():
@@ -153,46 +213,73 @@ def main(argv=None):
             v.set_texts([(None, mujoco.mjtGridPos.mjGRID_TOPLEFT, left, right),
                          (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_BOTTOMLEFT, HELP[0], HELP[1])])
 
+        def frame():
+            """Sync one frame. Returns True if new wheel speeds were typed."""
+            with v.lock():
+                # The number keys toggle groups of objects in MuJoCo's viewer; keep everything showing.
+                v.opt.geomgroup[:] = 1
+            v.sync()
+            new = False
+            while not typed.empty():
+                line = typed.get()
+                try:
+                    rpm = parse_command(line, machine.cfg)
+                except ValueError as e:
+                    print(f"  {e}")
+                    continue
+                with v.lock():
+                    machine.data.ctrl[:] = rpm  # same place the sliders write
+                print("  ok: " + " / ".join(f"{r:.0f}" for r in rpm) + " rpm")
+                new = True
+            return new
+
         stuck_at = None
         while v.is_running():
-            # The sliders write straight into the motor commands, which are in rpm.
+            # Typed numbers and the sliders both end up in the motor commands, which are in rpm.
             with v.lock():
                 asked = tuple(float(np.round(x)) for x in machine.data.ctrl)
             if np.abs(np.subtract(asked, machine.cfg.wheel_rpm)).max() > 0.5:
                 if asked == stuck_at:
-                    v.sync()
+                    frame()
                     time.sleep(0.1)
                     continue
                 v.set_texts((None, mujoco.mjtGridPos.mjGRID_TOPLEFT, "aiming for the new wheel speeds...",
                              " / ".join(f"{r:.0f}" for r in asked) + " rpm"))
-                v.sync()
+                frame()
                 try:
                     pitch = throw(machine.cfg.with_(wheel_rpm=asked))
                 except RuntimeError:
                     stuck_at = asked
                     v.set_texts((None, mujoco.mjtGridPos.mjGRID_TOPLEFT,
                                  "the ball never left the wheels", "turn the wheels up"))
+                    print("  the ball never left the wheels; turn them up")
                     continue
                 stuck_at = None
                 with v.lock():
                     machine.retarget(pitch.launch.config)
-                print("\n" + pitch.summary())
+                print("\n" + pitch.summary() + "\n")
 
             with v.lock():
                 v.user_scn.ngeom = 0
+            interrupted = False
             for phase, info in replay(machine, lock=v.lock):
                 start = time.time()
                 show("launch (250x slow motion)" if phase == "launch" else "flight (half speed)")
                 if info is not None:
                     with v.lock():
                         _trail(v.user_scn, *info)
-                v.sync()
+                if frame():
+                    interrupted = True  # start the new pitch right away
+                    break
                 if not v.is_running():
                     return
                 time.sleep(max(0.0, FRAME - (time.time() - start)))
-            # Pause on the result; keep listening to the sliders.
+            if interrupted:
+                continue
+            # Pause on the result; keep listening for new wheel speeds.
             for _ in range(int(1.0 / FRAME)):
-                v.sync()
+                if frame():
+                    break
                 time.sleep(FRAME)
 
 
