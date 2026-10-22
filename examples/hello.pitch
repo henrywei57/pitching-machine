@@ -1,0 +1,7 @@
+# The simplest PitchScript file: make one pitch, print what happened, watch it.
+#
+#   pitchscript examples/hello.pitch
+
+x = pitch(300, 4200, 4754)    # wheel rpm: top, lower 3B, lower 1B
+print(x.result())
+x.show()

@@ -45,7 +45,8 @@ class Flight:
         return self.pos.shape[1]
 
 
-def fly(position, velocity, omega, R0, aero: Aero = None, dt=1e-3, plate_x=PLATE_DISTANCE, t_max=1.5, record_every=1):
+def fly(position, velocity, omega, R0, aero: Aero = None, dt=1e-3, plate_x=PLATE_DISTANCE, t_max=1.5, record_every=1,
+        stop_at_ground=True):
     """Fly a batch of balls until each reaches the plate or the ground.
 
     dt = 1 ms is converged to better than 0.01 in at the plate, even for a
@@ -90,7 +91,8 @@ def fly(position, velocity, omega, R0, aero: Aero = None, dt=1e-3, plate_x=PLATE
             plate_p[crossed] = p[crossed] + f[:, None] * (p_new[crossed] - p[crossed])
             plate_v[crossed] = v[crossed] + f[:, None] * (v_new[crossed] - v[crossed])
             done |= crossed
-        done |= p_new[:, 2] < BALL_RADIUS  # hit the dirt first
+        if stop_at_ground:
+            done |= p_new[:, 2] < BALL_RADIUS  # hit the dirt first
 
         p, v, t, step = p_new, v_new, t + dt, step + 1
         a, R = accel(t, v)
@@ -103,9 +105,11 @@ def movement(position, velocity, omega, R0, aero: Aero = None, **kw):
     minus where the same release would cross with only gravity and drag.
     Returns (horizontal, vertical); horizontal + toward first base."""
     aero = aero or Aero()
-    real = fly(position, velocity, omega, R0, aero, record_every=10**9, **kw)
+    real = fly(position, velocity, omega, R0, aero, **kw)  # the whole path, for plots and replays
     ref_aero = Aero(drag=aero.drag, cd_constant=aero.cd_constant, lift=False, seam=False,
                     crisis_shift=aero.crisis_shift, rho=aero.rho)
-    ref = fly(position, velocity, omega, R0, ref_aero, record_every=10**9, **kw)
+    # The reference can dive into the dirt before the plate (a big-backspin pitch
+    # aimed low); let it pass through the ground so the break is still defined.
+    ref = fly(position, velocity, omega, R0, ref_aero, record_every=10**9, stop_at_ground=False, **kw)
     d = (real.plate_pos - ref.plate_pos) / INCH
     return d[:, 1], d[:, 2], real

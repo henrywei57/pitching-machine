@@ -124,9 +124,87 @@ free camera (drag to spin around, right-drag to move, scroll to zoom).
 | `machine` | close-up of the three wheels grabbing the ball |
 | `follow_ball` | rides along next to the ball all the way to the plate |
 
+### PitchScript: my own little language for the machine
+
+I made a tiny language so I can write out a bunch of pitches in a file and
+run it. The files end in `.pitch`:
+
+```python
+x = pitch(300, 4200, 4754)    # wheel rpm: top, lower 3B, lower 1B
+print(x.result())
+x.show()
+```
+
+Run a file with:
+
+```bash
+.venv/bin/pitchscript examples/hello.pitch
+```
+
+You can throw several pitches **at the same time**. Each one gets its own
+ball color and trail:
+
+```python
+fast = pitch("fastball", color="blue")
+curve = pitch("curveball", color="orange")
+knuckle = pitch("knuckleball", color="yellow")
+mine = pitch(3600, 2200, 2900, color="pink")
+show(fast, curve, knuckle, mine)
+```
+
+Things you can do in a `.pitch` file:
+
+| | |
+|---|---|
+| `pitch(3200, 2600, 2000)` | a pitch from the three wheel rpms (top, lower 3B, lower 1B) |
+| `pitch("curveball")` | a preset: `fastball`, `curveball`, `knuckle-curve`, `knuckleball` |
+| `pitch(speed=85, spin=-2000, axis=15)` | say what pitch you want and it works out the wheels (`calibrate=True` makes it keep adjusting until it's exact) |
+| `color="red"`, `seed=3`, `friction=0.9` | options for any `pitch(...)`: ball color, how the ball sits in the chute, tire grip |
+| `x.result()` | the whole report as text |
+| `x.speed`, `x.spin`, `x.axis`, `x.wheels` | what came out of the machine (mph, rpm, degrees, rpms) |
+| `x.plate_speed`, `x.height`, `x.side`, `x.time` | at the plate (mph, feet, inches toward 1B, seconds) |
+| `x.hbreak`, `x.vbreak` | how much it broke (inches) |
+| `x.show()` / `show(a, b, c)` | open the 3D viewer (a list works too: `show(my_list)`) |
+| `show(a, b, camera="catcher")` | pick the camera: `watcher`, `catcher`, `batter`, `side`, `machine`, `follow_ball` |
+| `gif("file.gif", a, b)` | save the animation as a GIF instead of opening a window |
+| `x.plot("file.png")` | save a side view and top view of the flight |
+
+It also has the normal stuff: numbers, `"text"`, f-strings like
+`f"{x.speed:.1f} mph"`, lists with `.append()`, math, `if`/`elif`/`else`,
+`for`, `while`, `print`, `range`, `round`, `min`, `max`, and `#` comments.
+For example, this sweeps the top wheel and shows all five pitches together
+from the side:
+
+```python
+pitches = []
+for top in range(2000, 4001, 500):
+    p = pitch(top, 2600, 2000)
+    print(f"top wheel {top} rpm -> {p.speed:.1f} mph, breaks {p.vbreak:+.1f} in")
+    pitches.append(p)
+show(pitches, camera="side")
+```
+
+There are more in [`examples/`](examples). Run `.venv/bin/pitchscript --help`
+for the full list of what's in the language.
+
+How it works: the syntax looks like Python because I used Python's parser to
+read the file, but [`script.py`](pitching_machine/script.py) runs it with its
+own interpreter. Only the things above exist (no `import`, no files, no
+`def`), and if you make a mistake it tells you the line and what to fix:
+
+```
+bad.pitch, line 1: pitch() needs 3 wheel rpms (top, lower 3B, lower 1B), a preset name like "curveball", or speed= and spin=
+    x = pitch(3200, 2600)
+```
+
+Each `pitch(...)` takes about a second to simulate, because it actually runs
+the machine and aims it. `show()` opens the window and waits until you close
+it, then the rest of the file keeps going. If you open the folder in VS
+Code, `.pitch` files get Python colors (that's in `.vscode/settings.json`).
+
 ### Tests and graphs
 
-To run the tests (59 of them, about 30 seconds) and remake every graph and GIF here:
+To run the tests (74 of them, about 40 seconds) and remake every graph and GIF here:
 
 ```bash
 pytest
@@ -341,9 +419,12 @@ pitching_machine/
   imu.py               the fake sensor inside the ball
   pitch.py             presets, aiming, and the command line tool
   view.py              the 3D viewer (cameras, typing rpm in the window, controls panel)
+  show.py              plays several pitches at once with colored balls and trails
+  script.py            PitchScript, the .pitch language
   pybullet_machine.py  the same machine in PyBullet
+examples/              .pitch files to try
 experiments/           one script for each graph
-tests/                 59 tests (contact springs, symmetry, same-answer-twice, step size, the IMU, ...)
+tests/                 74 tests (contact springs, symmetry, same-answer-twice, step size, the IMU, ...)
 ```
 
 ## What's not realistic (yet)

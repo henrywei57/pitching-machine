@@ -1,0 +1,11 @@
+# Four different pitches thrown at the same time, each with its own color.
+
+fast = pitch("fastball", color="blue")
+curve = pitch("curveball", color="orange")
+knuckle = pitch("knuckleball", color="yellow")
+mine = pitch(3600, 2200, 2900, color="pink")
+
+for p in [fast, curve, knuckle, mine]:
+    print(p)
+
+show(fast, curve, knuckle, mine)

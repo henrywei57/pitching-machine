@@ -159,3 +159,73 @@ def test_backspace_from_the_viewer_is_noticed():
     assert not m.was_reset
     mujoco.mj_resetData(m.model, m.data)
     assert m.was_reset
+
+
+# -- PitchScript --------------------------------------------------------------------
+
+def run_script(src):
+    from pitching_machine.script import Interpreter
+
+    return Interpreter().run(src)
+
+
+def test_script_makes_a_pitch_and_reads_it(capsys):
+    v = run_script('x = pitch(3200, 2600, 2000)\nprint(f"{x.speed:.1f}", x.axis)\nr = x.result()\n')
+    out = capsys.readouterr().out
+    assert out.split() == [f"{v['x'].speed:.1f}", str(v["x"].axis)]
+    assert "lower 1B 2000" in v["r"]
+
+
+def test_script_loops_lists_and_presets():
+    v = run_script(
+        "ps = []\n"
+        "for top in range(3000, 3401, 400):\n"
+        "    ps.append(pitch(top, 2600, 2000))\n"
+        "k = pitch('knuckleball', color='red', seed=2)\n"
+        "faster = ps[1].speed > ps[0].speed\n"
+    )
+    assert len(v["ps"]) == 2 and v["faster"] is True
+    assert v["k"].color == "red"
+    assert [p.color for p in v["ps"]] == ["orange", "blue"]  # handed out in order
+
+
+def test_script_speed_and_spin_form():
+    v = run_script("p = pitch(speed=80, spin=2200, axis=30, calibrate=True)\n")
+    assert abs(v["p"].speed - 80) < 0.5 and abs(v["p"].spin - 2200) < 50
+
+
+@pytest.mark.parametrize("src, words", [
+    ("x = pitch(3200, 2600)", "needs 3 wheel rpms"),
+    ("import os", "doesn't have import"),
+    ("def f():\n    pass", "doesn't have making your own functions"),
+    ("print(nope)", "don't know what 'nope'"),
+    ("x = pitch('curveball')\nprint(x._p)", "doesn't have '._p'"),
+    ("x = pitch(9000, 2600, 2000)", "between 0 and 6000"),
+    ("x = pitch('curveball', colour='red')", "no option called colour="),
+    ("x = pitch('curveball', color='plaid')", "unknown color"),
+    ("print(1 / 0)", "dividing by zero"),
+    ("while True:\n    pass", "is it stuck"),
+])
+def test_script_mistakes_say_what_went_wrong(src, words):
+    from pitching_machine.script import ScriptError
+
+    with pytest.raises(ScriptError) as e:
+        run_script(src)
+    assert words in str(e.value)
+    assert e.value.line is not None
+
+
+def test_script_saves_a_gif(tmp_path):
+    out = tmp_path / "two.gif"
+    run_script(f'a = pitch("curveball")\nb = pitch("knuckleball")\ngif("{out}", a, b, camera="side")\n')
+    assert out.stat().st_size > 10_000
+
+
+def test_examples_parse():
+    import ast
+    from pathlib import Path
+
+    files = sorted(Path(__file__).parents[1].glob("examples/*.pitch"))
+    assert len(files) >= 4
+    for f in files:
+        ast.parse(f.read_text())

@@ -1,0 +1,9 @@
+# Turn the top wheel up a little at a time and see what it does to the pitch.
+
+pitches = []
+for top in range(2000, 4001, 500):
+    p = pitch(top, 2600, 2000)
+    print(f"top wheel {top} rpm -> {p.speed:.1f} mph, {p.spin:+.0f} rpm, breaks {p.vbreak:+.1f} in up/down")
+    pitches.append(p)
+
+show(pitches, camera="side")

@@ -1,0 +1,11 @@
+# Five knuckleballs with the exact same wheel speeds. The only thing that
+# changes is how the ball sits in the chute (the seed), and that's enough.
+
+balls = []
+for s in range(5):
+    k = pitch("knuckleball", seed=s)
+    print(f"seed {s}: crosses {k.height:.2f} ft high, {k.side:+.1f} in toward 1B")
+    balls.append(k)
+
+gif("knuckleballs.gif", balls, camera="catcher")   # saves a GIF too
+show(balls, camera="catcher")

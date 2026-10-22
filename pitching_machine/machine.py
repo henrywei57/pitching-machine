@@ -451,7 +451,7 @@ def build_mjcf(cfg, scene=False, plate_distance=PLATE_DISTANCE):
 # Launch
 # ----------------------------------------------------------------------------------
 
-LOG_KEYS = ("t", "x", "speed", "spin", "gyro", "accel")
+LOG_KEYS = ("t", "pos", "x", "speed", "spin", "gyro", "accel")
 # Per wheel i: rim_i, normal_i, friction_i, squash_i, slip_i.
 CONTACT_KEYS = ("normal", "friction", "squash", "slip")
 
@@ -757,6 +757,7 @@ class Machine:
             left = first_touch is not None and not con
             if steps % record_every == 0 or left:
                 log["t"].append(d.time)
+                log["pos"].append(pos)  # world position, for replaying the launch
                 log["x"].append(xh)
                 log["speed"].append(np.linalg.norm(vel))
                 log["spin"].append(omega @ axis)
