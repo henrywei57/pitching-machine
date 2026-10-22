@@ -82,21 +82,35 @@ then the flight at half speed with an orange trail behind the ball. The
 numbers in the top-left corner show the wheel speeds, what came out of the
 machine, and where the ball crossed the plate.
 
-**Changing the wheel speeds while it's running:** click back on the terminal
-you launched it from, type the new speeds and press Enter:
+**Changing the wheel speeds while it's running:** just start typing a number
+in the 3D window. A box pops up in the top-right corner:
 
 ```
-3200 2600 2000    all three wheels, in order: top, lower 3B, lower 1B
-top 3500          just one wheel (3b and 1b work too)
-curveball         a preset: fastball, curveball, knuckle-curve, knuckleball
+NEW WHEEL SPEEDS          rpm
+> top                     3500_
+  lower 3B                (2600)
+  lower 1B                (2000)
 ```
 
-The pitch switches right away. The machine re-aims at the middle of the zone
-first, so the ball still comes in for a strike and you can see how the break
-changes. Don't type the numbers into the 3D window itself, because MuJoCo uses
-the number keys for other stuff. You can also drag the sliders instead: in the
-panel on the right, open **Control** and there's one for each wheel
-(`top_rpm`, `lower_3B_rpm`, `lower_1B_rpm`, 0 to 6000 rpm).
+Type the top wheel's rpm and press **Enter**, then the lower 3B wheel and
+**Enter**, then the lower 1B wheel and **Enter** to throw. Pressing Enter
+without typing anything keeps that wheel's old speed, and **Backspace**
+deletes a digit. The machine re-aims at the middle of the zone first, so the
+ball still comes in for a strike and you can see how the break changes.
+
+There's also a **controls panel** in the bottom-left corner of the window
+that lists every key, so you don't have to remember them. Two other ways to
+change the speeds:
+
+- **Sliders:** in the panel on the right, open **Control** and drag `top_rpm`,
+  `lower_3B_rpm` or `lower_1B_rpm` (0 to 6000 rpm).
+- **The terminal** you launched it from: type `3200 2600 2000` (all three),
+  `top 3500` (one wheel), or a preset name like `curveball`, then press Enter.
+
+MuJoCo's window has its own shortcuts on almost every key (that's how I
+accidentally made everything disappear once by pressing a number). The
+viewer now keeps all the objects showing, and if Backspace resets the scene
+it just restarts the pitch with the same speeds.
 
 **Camera views:** press `[` and `]` to switch between them, or `Esc` for a
 free camera (drag to spin around, right-drag to move, scroll to zoom).
@@ -112,7 +126,7 @@ free camera (drag to spin around, right-drag to move, scroll to zoom).
 
 ### Tests and graphs
 
-To run the tests (55 of them, about 30 seconds) and remake every graph and GIF here:
+To run the tests (59 of them, about 30 seconds) and remake every graph and GIF here:
 
 ```bash
 pytest
@@ -326,10 +340,10 @@ pitching_machine/
   flight.py            flies the ball to the plate, measures break like Statcast does
   imu.py               the fake sensor inside the ball
   pitch.py             presets, aiming, and the command line tool
-  view.py              the 3D viewer (camera views, typed rpm, sliders)
+  view.py              the 3D viewer (cameras, typing rpm in the window, controls panel)
   pybullet_machine.py  the same machine in PyBullet
 experiments/           one script for each graph
-tests/                 55 tests (contact springs, symmetry, same-answer-twice, step size, the IMU, ...)
+tests/                 59 tests (contact springs, symmetry, same-answer-twice, step size, the IMU, ...)
 ```
 
 ## What's not realistic (yet)

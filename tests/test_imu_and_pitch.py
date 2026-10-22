@@ -1,3 +1,4 @@
+import mujoco
 import numpy as np
 import pytest
 
@@ -7,7 +8,7 @@ from pitching_machine.flight import fly
 from pitching_machine.imu import IMUSpec, model_residual, reconstruct, record
 from pitching_machine.machine import Machine
 from pitching_machine.pitch import ZONE_MIDDLE, main, preset_config, rpm_config, throw
-from pitching_machine.view import CAMERAS, overlay, parse_command, replay
+from pitching_machine.view import CAMERAS, KEY_BACKSPACE, KEY_ENTER, WheelEntry, overlay, parse_command, replay
 
 PERFECT = IMUSpec(gyro_noise=0, gyro_bias=0, accel_noise=0, accel_bias=0)
 
@@ -122,3 +123,39 @@ def test_typed_nonsense_gets_a_hint(typed):
 
 def test_typing_a_preset_loads_its_wheels():
     assert parse_command("knuckleball", rpm_config([3200, 2600, 2000])) == preset_config("knuckleball").wheel_rpm
+
+
+def _type_into(entry, keys, current=(3200, 2600, 2000)):
+    """Feed a string to WheelEntry: digits, '\n' for Enter, '<' for Backspace."""
+    out = None
+    for ch in keys:
+        code = {"\n": KEY_ENTER, "<": KEY_BACKSPACE}.get(ch, ord(ch))
+        got = entry.key(code, current)
+        out = got if got is not None else out
+    return out
+
+
+def test_typing_in_the_window_sets_each_wheel():
+    e = WheelEntry(["top", "lower 3B", "lower 1B"])
+    assert _type_into(e, "3500\n2400\n2100\n") == (3500, 2400, 2100)
+    assert not e.active
+
+
+def test_empty_enter_keeps_a_wheel_and_backspace_fixes_typos():
+    e = WheelEntry(["top", "lower 3B", "lower 1B"])
+    assert _type_into(e, "35009\n") is None  # only 4 digits fit
+    assert _type_into(e, "\n18<9\n") == (3500, 2600, 19)
+
+
+def test_typing_too_fast_is_refused_on_screen():
+    e = WheelEntry(["top", "lower 3B", "lower 1B"])
+    assert _type_into(e, "9000\n") is None
+    assert "6000" in e.box((3200, 2600, 2000))[1]
+    assert e.active and e.wheel == 0
+
+
+def test_backspace_from_the_viewer_is_noticed():
+    m = Machine(preset_config("curveball"), scene=True)
+    assert not m.was_reset
+    mujoco.mj_resetData(m.model, m.data)
+    assert m.was_reset

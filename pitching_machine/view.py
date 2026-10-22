@@ -5,16 +5,18 @@
     mjpython -m pitching_machine.view --rpm 3200 2600 2000 --camera catcher
 
 In the window:
-  Wheel speeds   Type them in the terminal and press Enter (see below), or open
-                 "Control" in the panel on the right and drag the top_rpm,
-                 lower_3B_rpm and lower_1B_rpm sliders. The next pitch uses them;
-                 the machine re-aims at the middle of the zone first.
+  Wheel speeds   Just start typing a number. It goes into the top wheel; press
+                 Enter for the lower 3B wheel, Enter again for the lower 1B wheel,
+                 and Enter once more to throw. An empty Enter keeps that wheel's
+                 old speed, Backspace deletes a digit. (The sliders under Control
+                 in the right-hand panel work too.) The machine re-aims at the
+                 middle of the zone before every new setting.
   Cameras        [ and ] step through watcher, catcher, batter, side, machine and
                  follow_ball. Esc gives a free camera: drag to orbit, right-drag
                  to pan, scroll to zoom.
   Quit           close the window.
 
-Typing in the terminal while it runs:
+Typing in the terminal while it runs works too:
   3200 2600 2000    all three wheels, in order: top, lower 3B, lower 1B
   top 3500          just one wheel (3b, 1b, and bottom on a two-wheel machine)
   curveball         a preset: fastball, curveball, knuckle-curve, knuckleball
@@ -33,7 +35,7 @@ import numpy as np
 from .aero import Aero
 from .constants import FOOT, INCH, MPH, RPM
 from .flight import fly
-from .machine import THREE_WHEEL, TWO_WHEEL, Machine, MachineConfig, cameras, mat_to_quat
+from .machine import MAX_RPM, THREE_WHEEL, TWO_WHEEL, Machine, MachineConfig, cameras, mat_to_quat
 from .pitch import PRESETS, preset_config, rpm_config, throw
 
 FRAME = 1.0 / 60.0  # s of wall clock per frame
@@ -105,9 +107,94 @@ def overlay(pitch, phase=""):
     return "\n".join(left), "\n".join(right)
 
 
-HELP = ("change wheel speeds: type them in the terminal (like 3200 2600 2000), or drag the sliders on the right",
-        "[ ]  next camera     Esc  free camera     close window to quit")
-TYPING_HELP = __doc__.split("Typing in the terminal while it runs:")[1].rstrip()
+# GLFW key codes the viewer hands to key_callback.
+KEY_ENTER, KEY_KP_ENTER, KEY_BACKSPACE = 257, 335, 259
+DIGITS = {**{48 + d: str(d) for d in range(10)}, **{320 + d: str(d) for d in range(10)}}  # row and keypad
+
+
+def controls_help(camera):
+    """The always-on controls panel: (keys column, what-they-do column)."""
+    keys = ["CONTROLS", "0-9", "Enter", "Backspace", "[  ]", "Esc", "mouse", "right panel"]
+    what = ["",
+            "type a wheel speed (starts with the top wheel)",
+            "next wheel; after the last one, throw",
+            "delete a digit",
+            f"change camera (now: {camera})",
+            "free camera",
+            "drag to orbit, right-drag to pan, scroll to zoom",
+            "Control > sliders also set the wheels"]
+    return "\n".join(keys), "\n".join(what)
+
+
+class WheelEntry:
+    """Typing wheel speeds into the 3D window: digits for the current wheel,
+    Enter to move to the next one, Enter after the last to apply."""
+
+    MAX_DIGITS = 4
+
+    def __init__(self, labels):
+        self.labels = list(labels)
+        self.message = ""
+        self.cancel()
+
+    @property
+    def active(self):
+        return self.wheel is not None
+
+    def cancel(self):
+        self.wheel = None
+        self.fields = [""] * len(self.labels)
+
+    def key(self, keycode, current):
+        """Feed one key. Returns the new rpms (a tuple) once the last wheel is entered."""
+        if keycode in DIGITS:
+            if not self.active:
+                self.wheel, self.fields, self.message = 0, [""] * len(self.labels), ""
+            if len(self.fields[self.wheel]) < self.MAX_DIGITS:
+                self.fields[self.wheel] += DIGITS[keycode]
+        elif keycode in (KEY_ENTER, KEY_KP_ENTER) and self.active:
+            typed = self.fields[self.wheel]
+            if typed and float(typed) > MAX_RPM:
+                self.message = f"{typed} is too fast: {MAX_RPM:.0f} rpm max"
+                self.fields[self.wheel] = ""
+                return None
+            self.message = ""
+            self.wheel += 1
+            if self.wheel == len(self.labels):
+                rpm = tuple(float(f) if f else float(c) for f, c in zip(self.fields, current))
+                self.cancel()
+                return rpm
+        elif keycode == KEY_BACKSPACE and self.active:
+            if self.fields[self.wheel]:
+                self.fields[self.wheel] = self.fields[self.wheel][:-1]
+            elif self.wheel > 0:
+                self.wheel -= 1
+            else:
+                self.cancel()
+        return None
+
+    def box(self, current):
+        """(left, right) text for the typing box, or None when nothing is being typed."""
+        if not self.active:
+            return ("", self.message) if self.message else None
+        left, right = ["NEW WHEEL SPEEDS"], ["rpm"]
+        for i, (lab, field, cur) in enumerate(zip(self.labels, self.fields, current)):
+            if i < self.wheel:
+                shown = field or f"{cur:.0f}"
+            elif i == self.wheel:
+                shown = field + "_"
+            else:
+                shown = f"({cur:.0f})"
+            left.append(("> " if i == self.wheel else "  ") + lab)
+            right.append(shown)
+        last = self.wheel == len(self.labels) - 1
+        left += ["", "Enter"]
+        right += ["", "throw" if last else "next wheel  (empty keeps the old speed)"]
+        if self.message:
+            left.append("")
+            right.append(self.message)
+        return "\n".join(left), "\n".join(right)
+TYPING_HELP = __doc__.split("Typing in the terminal while it runs works too:")[1].rstrip()
 
 
 def parse_command(text, cfg):
@@ -202,56 +289,79 @@ def main(argv=None):
 
     typed = queue.Queue()
     threading.Thread(target=_read_lines, args=(typed,), daemon=True).start()
+    keys = queue.Queue()  # key presses from the viewer's thread
+    entry = WheelEntry(machine.cfg.labels)
 
-    with mujoco.viewer.launch_passive(m, machine.data, show_left_ui=False) as v:
+    with mujoco.viewer.launch_passive(m, machine.data, key_callback=keys.put, show_left_ui=False) as v:
         with v.lock():
             v.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
             v.cam.fixedcamid = m.camera(a.camera).id
 
+        def camera_name():
+            fixed = v.cam.type == mujoco.mjtCamera.mjCAMERA_FIXED and 0 <= v.cam.fixedcamid < len(CAMERAS)
+            return CAMERAS[v.cam.fixedcamid] if fixed else "free"
+
         def show(phase=""):
             left, right = overlay(pitch, phase)
-            v.set_texts([(None, mujoco.mjtGridPos.mjGRID_TOPLEFT, left, right),
-                         (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_BOTTOMLEFT, HELP[0], HELP[1])])
+            texts = [(None, mujoco.mjtGridPos.mjGRID_TOPLEFT, left, right),
+                     (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_BOTTOMLEFT, *controls_help(camera_name()))]
+            box = entry.box(machine.cfg.wheel_rpm)
+            if box:
+                texts.append((None, mujoco.mjtGridPos.mjGRID_TOPRIGHT, *box))
+            v.set_texts(texts)
 
-        def frame():
-            """Sync one frame. Returns True if new wheel speeds were typed."""
+        def frame(phase=""):
+            """Draw and sync one frame. Returns True when the current pitch should
+            stop: new wheel speeds were entered, or MuJoCo reset the scene."""
+            show(phase)
             with v.lock():
-                # The number keys toggle groups of objects in MuJoCo's viewer; keep everything showing.
+                # The number keys also toggle groups of objects in MuJoCo's viewer; keep everything showing.
                 v.opt.geomgroup[:] = 1
             v.sync()
-            new = False
+            restart = machine.was_reset  # MuJoCo's viewer resets everything on Backspace
+            new_rpm = None
+            while not keys.empty():
+                got = entry.key(keys.get(), machine.cfg.wheel_rpm)
+                if got is not None:
+                    new_rpm = got
             while not typed.empty():
                 line = typed.get()
                 try:
-                    rpm = parse_command(line, machine.cfg)
+                    new_rpm = parse_command(line, machine.cfg)
                 except ValueError as e:
                     print(f"  {e}")
-                    continue
-                with v.lock():
-                    machine.data.ctrl[:] = rpm  # same place the sliders write
-                print("  ok: " + " / ".join(f"{r:.0f}" for r in rpm) + " rpm")
-                new = True
-            return new
+            with v.lock():
+                if new_rpm is not None:
+                    try:
+                        machine.cfg.with_(wheel_rpm=new_rpm).check_rpm()
+                        machine.data.ctrl[:] = new_rpm  # same place the sliders write
+                        print("  ok: " + " / ".join(f"{r:.0f}" for r in new_rpm) + " rpm")
+                        return True
+                    except ValueError as e:
+                        entry.message = str(e)
+                if restart:
+                    # Undo the reset's 0 rpm so the next pitch keeps the wheel speeds.
+                    machine.data.ctrl[:] = machine.cfg.wheel_rpm
+                    machine.data.userdata[0] = 1.0
+            return restart
 
         stuck_at = None
         while v.is_running():
-            # Typed numbers and the sliders both end up in the motor commands, which are in rpm.
+            # Typed speeds and the sliders both end up in the motor commands, which are in rpm.
             with v.lock():
                 asked = tuple(float(np.round(x)) for x in machine.data.ctrl)
             if np.abs(np.subtract(asked, machine.cfg.wheel_rpm)).max() > 0.5:
                 if asked == stuck_at:
-                    frame()
-                    time.sleep(0.1)
+                    frame("the ball never left the wheels: turn them up")
+                    time.sleep(FRAME)
                     continue
                 v.set_texts((None, mujoco.mjtGridPos.mjGRID_TOPLEFT, "aiming for the new wheel speeds...",
                              " / ".join(f"{r:.0f}" for r in asked) + " rpm"))
-                frame()
+                v.sync()
                 try:
                     pitch = throw(machine.cfg.with_(wheel_rpm=asked))
                 except RuntimeError:
                     stuck_at = asked
-                    v.set_texts((None, mujoco.mjtGridPos.mjGRID_TOPLEFT,
-                                 "the ball never left the wheels", "turn the wheels up"))
                     print("  the ball never left the wheels; turn them up")
                     continue
                 stuck_at = None
@@ -264,12 +374,11 @@ def main(argv=None):
             interrupted = False
             for phase, info in replay(machine, lock=v.lock):
                 start = time.time()
-                show("launch (250x slow motion)" if phase == "launch" else "flight (half speed)")
                 if info is not None:
                     with v.lock():
                         _trail(v.user_scn, *info)
-                if frame():
-                    interrupted = True  # start the new pitch right away
+                if frame("launch (250x slow motion)" if phase == "launch" else "flight (half speed)"):
+                    interrupted = True  # start over right away (new speeds, or a reset)
                     break
                 if not v.is_running():
                     return
@@ -278,10 +387,9 @@ def main(argv=None):
                 continue
             # Pause on the result; keep listening for new wheel speeds.
             for _ in range(int(1.0 / FRAME)):
-                if frame():
+                if frame("done: next pitch coming"):
                     break
                 time.sleep(FRAME)
-
 
 if __name__ == "__main__":
     main()

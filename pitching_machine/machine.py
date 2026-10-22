@@ -409,6 +409,7 @@ def build_mjcf(cfg, scene=False, plate_distance=PLATE_DISTANCE):
     return f"""
 <mujoco model="{n}_wheel_pitching_machine">
   <compiler angle="radian" autolimits="true"/>
+  <size nuserdata="1"/>
   <option timestep="{cfg.timestep}" gravity="0 0 -9.81" integrator="implicitfast" cone="elliptic" impratio="10"/>
   <visual>
     <global offwidth="1280" offheight="720" fovy="40"/>
@@ -576,15 +577,22 @@ class Machine:
         return -np.array(self.cfg.wheel_rpm) * RPM
 
     def reset(self):
+        """Ball in the chute, wheels at speed."""
         m, d = self.model, self.data
         mujoco.mj_resetData(m, d)
         tgt = self.wheel_targets
         for i in self.wheels:
             d.qvel[self.dadr[i]] = tgt[i]  # wheels already up to speed, as on a real machine
         d.ctrl[:] = self.cfg.wheel_rpm  # motor commands are in rpm
+        d.userdata[0] = 1.0  # mj_resetData zeroes this, so a reset from outside (the viewer) is detectable
         d.qvel[self.ball_dadr : self.ball_dadr + 3] = self.R_head @ np.array([self.cfg.feed_speed, 0, 0])
         mujoco.mj_forward(m, d)
         self.contacts = {}
+
+    @property
+    def was_reset(self):
+        """True if something other than reset() wiped the data (MuJoCo's viewer does on Backspace)."""
+        return self.data.userdata[0] == 0.0
 
     def ball_state(self):
         d = self.data
